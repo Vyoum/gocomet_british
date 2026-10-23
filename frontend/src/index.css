@@ -10,3 +10,38 @@
 .th { @apply px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500; }
 .td { @apply px-3 py-2 text-sm; }
 }
+
+/* ---------- Print / Save as PDF ---------- */
+@page { size: A4; margin: 12mm; }
+@media print {
+  html, body { background: #fff !important; font-size: 11px; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-shadow: none !important; }
+  .no-print, .print-hide { display: none !important; }
+  .print-show { display: block !important; overflow: visible !important; }
+  .print-block { display: block !important; }
+  .print-block > * + * { margin-top: 12px; }
+  .print-full { grid-column: auto !important; width: 100% !important; }
+  main, header > div { max-width: none !important; padding-left: 0 !important; padding-right: 0 !important; }
+  header { border: 0 !important; }
+
+  /* nothing clipped or truncated */
+  *, *::before, *::after { overflow: visible !important; text-overflow: clip !important; max-width: none !important; }
+  .truncate, .whitespace-nowrap { white-space: normal !important; }
+  td, th, li, dd, dt, h1, h2, p, span, a { overflow-wrap: break-word; word-break: normal; hyphens: none; }
+  th { white-space: nowrap; }
+  .print-wrap, .print-wrap * { overflow-wrap: anywhere !important; }
+  [class*="w-44"] { width: auto !important; }
+
+  /* tables fit page width, header repeats, rows never split */
+  table { width: 100% !important; min-width: 0 !important; table-layout: auto !important; border-collapse: collapse; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr, .print-row, li, dl > div { break-inside: avoid; page-break-inside: avoid; }
+  .card { border-color: #e2e8f0 !important; padding: 8px !important; }
+  .card.p-0 { padding: 0 !important; }
+  .th, .td { padding: 3px 5px !important; font-size: 10px !important; line-height: 1.3; }
+  h1, h2 { break-after: avoid; page-break-after: avoid; }
+  a { color: inherit; text-decoration: none; }
+  details > summary { list-style: none; }
+  details::details-content { content-visibility: visible !important; display: block !important; }
+}

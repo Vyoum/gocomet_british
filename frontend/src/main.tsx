@@ -20,3 +20,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </BrowserRouter>
   </React.StrictMode>,
 );
+
+// Print/PDF: expand collapsed <details> so all data is printed, restore afterwards.
+let openedForPrint: HTMLDetailsElement[] = [];
+window.addEventListener('beforeprint', () => {
+  openedForPrint = Array.from(document.querySelectorAll('details:not([open])')) as HTMLDetailsElement[];
+  openedForPrint.forEach((d) => (d.open = true));
+});
+window.addEventListener('afterprint', () => { openedForPrint.forEach((d) => (d.open = false)); openedForPrint = []; });

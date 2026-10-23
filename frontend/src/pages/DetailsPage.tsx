@@ -13,11 +13,11 @@ export default function DetailsPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <Link to="/" className="inline-block py-1 text-sm text-indigo-700">← All auctions</Link>
+      <Link to="/" className="no-print inline-block py-1 text-sm text-indigo-700">← All auctions</Link>
       <div className="card">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
-            <h1 className="break-words text-lg font-semibold sm:text-xl">{rfq.name} <StatusBadge s={rfq.status} /></h1>
+            <h1 className="print-wrap break-words text-lg font-semibold sm:text-xl">{rfq.name} <StatusBadge s={rfq.status} /></h1>
             <p className="text-sm text-slate-500">{rfq.referenceId} · Pickup {fmtDate(rfq.pickupDate)}</p>
           </div>
           <div className="sm:text-right">
@@ -35,10 +35,10 @@ export default function DetailsPage() {
           <Info k="Trigger" v={triggerLabel[rfq.triggerType]} wide />
         </dl>
       </div>
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="card min-w-0 p-0 lg:col-span-2">
+      <div className="print-block grid gap-6 lg:grid-cols-3">
+        <div className="card print-full min-w-0 p-0 lg:col-span-2">
           <h2 className="p-4 pb-2 font-semibold sm:p-5 sm:pb-2">Ranking (latest bid per supplier)</h2>
-          <ul className="space-y-2 px-4 pb-4 md:hidden" data-testid="rank-cards">
+          <ul className="space-y-2 px-4 pb-4 md:hidden print-hide" data-testid="rank-cards">
             {rfq.rankedBids.map((b) => (
               <li key={b.id} className={`rounded border p-3 text-sm ${b.rank === 1 ? 'border-green-300 bg-green-50' : 'border-slate-200'}`}>
                 <div className="flex items-baseline justify-between gap-2">
@@ -57,13 +57,13 @@ export default function DetailsPage() {
             ))}
             {!rfq.rankedBids.length && <li className="text-sm text-slate-500">No bids yet.</li>}
           </ul>
-          <div className="hidden overflow-x-auto md:block">
+          <div className="hidden overflow-x-auto md:block print-show">
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50"><tr>{['Rank', 'Carrier', 'Freight', 'Origin', 'Destination', 'Total', 'Transit', 'Valid until', 'Bid at'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100">
               {rfq.rankedBids.map((b) => (
-                <tr key={b.id} className={b.rank === 1 ? 'bg-green-50' : ''}>
-                  <td className="td font-bold">{b.label}</td><td className="td">{b.supplierName}</td>
+                <tr key={b.id} className={`print-row ${b.rank === 1 ? 'bg-green-50' : ''}`}>
+                  <td className="td font-bold">{b.label}</td><td className="td print-wrap">{b.supplierName}</td>
                   <td className="td">{fmtMoney(b.freightCharges)}</td><td className="td">{fmtMoney(b.originCharges)}</td><td className="td">{fmtMoney(b.destinationCharges)}</td>
                   <td className="td font-semibold">{fmtMoney(b.totalPrice)}</td><td className="td">{b.transitTimeDays} d</td>
                   <td className="td">{new Date(b.quoteValidUntil).toLocaleDateString()}</td><td className="td text-xs">{fmtDate(b.createdAt)}</td>
@@ -75,7 +75,7 @@ export default function DetailsPage() {
           </div>
           {rfq.allBids.length > rfq.rankedBids.length && (
             <details className="p-4 text-sm sm:p-5"><summary className="cursor-pointer text-slate-600">All bids incl. superseded ({rfq.allBids.length})</summary>
-              <ul className="mt-2 space-y-1">{rfq.allBids.map((b) => <li key={b.id} className="break-words">{fmtDate(b.createdAt)} — {b.supplierName}: {fmtMoney(b.totalPrice)}</li>)}</ul>
+              <ul className="mt-2 space-y-1">{rfq.allBids.map((b) => <li key={b.id} className="print-wrap break-words">{fmtDate(b.createdAt)} — {b.supplierName}: {fmtMoney(b.totalPrice)}</li>)}</ul>
             </details>)}
         </div>
         <BidForm rfq={rfq} onDone={load} />
@@ -84,10 +84,10 @@ export default function DetailsPage() {
         <h2 className="mb-3 font-semibold">Activity log</h2>
         <ul className="space-y-2 text-sm">
           {rfq.activity.map((a) => (
-            <li key={a.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-slate-100 pb-2 last:border-0 sm:flex-nowrap sm:border-0 sm:pb-0">
+            <li key={a.id} className="print-row flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-slate-100 pb-2 last:border-0 sm:flex-nowrap sm:border-0 sm:pb-0">
               <span className="shrink-0 text-xs text-slate-500 sm:w-44">{fmtDate(a.createdAt)}</span>
               <span title={a.type} className={`shrink-0 whitespace-nowrap rounded px-1.5 text-xs font-semibold ${ACTIVITY_STYLE[a.type]?.cls ?? 'bg-slate-100'}`}>{ACTIVITY_STYLE[a.type]?.label ?? a.type}</span>
-              <span className="min-w-0 basis-full break-words sm:basis-auto">{fmtActivity(a.message)}</span>
+              <span className="print-wrap min-w-0 basis-full break-words sm:basis-auto">{fmtActivity(a.message)}</span>
             </li>
           ))}
         </ul>
@@ -143,7 +143,7 @@ function BidForm({ rfq, onDone }: { rfq: RfqDetails; onDone: () => void }) {
   }
   const open = rfq.status === 'ACTIVE';
   return (
-    <form onSubmit={submit} className="card min-w-0 space-y-3">
+    <form onSubmit={submit} className="card no-print min-w-0 space-y-3">
       <h2 className="font-semibold">Submit quote</h2>
       <div><label className="label">Acting as carrier (demo — no auth)</label>
         <select className="input" value={f.supplierId} onChange={set('supplierId')}>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>

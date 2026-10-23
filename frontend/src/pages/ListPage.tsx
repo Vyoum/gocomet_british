@@ -29,10 +29,10 @@ export default function ListPage() {
     <div className="card p-0">
       <div className="flex items-center justify-between gap-3 p-4 sm:p-5">
         <h1 className="text-lg font-semibold">British Auctions</h1>
-        <Link to="/new" className="btn">+ New RFQ</Link>
+        <Link to="/new" className="btn no-print">+ New RFQ</Link>
       </div>
       {err && <p className="px-5 text-red-600">{err}</p>}
-      <ul className="divide-y divide-slate-100 border-t border-slate-100 md:hidden" data-testid="rfq-cards">
+      <ul className="divide-y divide-slate-100 border-t border-slate-100 md:hidden print-hide" data-testid="rfq-cards">
         {rfqs.map((r) => (
           <li key={r.id}>
             <Link to={`/rfq/${r.id}`} className="block p-4 active:bg-slate-50">
@@ -53,16 +53,16 @@ export default function ListPage() {
         ))}
         {!rfqs.length && <li className="p-4 text-sm text-slate-500">No RFQs yet.</li>}
       </ul>
-      <div className="hidden overflow-x-auto md:block">
+      <div className="hidden overflow-x-auto md:block print-show">
       <table className="min-w-full divide-y divide-slate-200">
         <thead className="bg-slate-50"><tr>
           {['RFQ', 'Lowest Bid', 'Current Close', 'Time Left', 'Forced Close', 'Bids', 'Status'].map((h) => <th key={h} className="th">{h}</th>)}
         </tr></thead>
         <tbody className="divide-y divide-slate-100">
           {rfqs.map((r) => (
-            <tr key={r.id} className="hover:bg-slate-50">
-              <td className="td"><Link className="font-medium text-indigo-700 hover:underline" to={`/rfq/${r.id}`}>{r.name}</Link><div className="text-xs text-slate-500">{r.referenceId}</div></td>
-              <td className="td"><div className="font-semibold">{fmtMoney(r.lowestBid)}</div><div className="mt-1"><Leaders ranks={r.topRanks} /></div></td>
+            <tr key={r.id} className="print-row hover:bg-slate-50">
+              <td className="td print-wrap"><Link className="font-medium text-indigo-700 hover:underline" to={`/rfq/${r.id}`}>{r.name}</Link><div className="text-xs text-slate-500">{r.referenceId}</div></td>
+              <td className="td print-wrap"><div className="font-semibold">{fmtMoney(r.lowestBid)}</div><div className="mt-1"><Leaders ranks={r.topRanks} /></div></td>
               <td className="td">{fmtDate(r.currentCloseTime)}{r.extensionCount > 0 && <span className="ml-1 text-xs text-amber-700">(+{r.extensionCount} ext)</span>}</td>
               <td className="td"><Countdown to={r.currentCloseTime} from={r.bidStartTime} onZero={load} /></td>
               <td className="td">{fmtDate(r.forcedCloseTime)}</td>

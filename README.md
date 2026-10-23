@@ -2,24 +2,26 @@
 
 A simplified RFQ (Request for Quotation) platform where carriers bid openly on freight RFQs using **British Auction** rules: automatic time extensions near the close, configurable triggers, and a hard **forced close**.
 
-- `backend/`: Node.js, TypeScript, Express, Prisma + PostgreSQL, Zod validation, SSE for live updates, Vitest unit tests
+- `backend/`: Python 3.12, FastAPI, SQLAlchemy 2.0 (async) + Alembic, Pydantic v2, psycopg 3, PostgreSQL, SSE for live updates, pytest
 - `frontend/`: React, Vite, TypeScript, Tailwind
 - `docs/`: [HLD](docs/HLD.md) and [DB schema](docs/SCHEMA.md)
 
 ## Local setup
 
-Requires Node 18+ and PostgreSQL. The easiest way to get Postgres is Docker.
+Requires Python 3.12, Node 18+ (frontend only) and PostgreSQL. The easiest way to get Postgres is Docker.
 
 ```bash
 # 0. Postgres (from repo root): postgres:postgres@localhost:5432/rfq
-docker compose up -d
+docker compose up -d postgres
 
 # 1. Backend
 cd backend
-cp .env.example .env   # DATABASE_URL points at the docker-compose Postgres
-npm install
-npm run setup          # prisma migrate deploy + generate + seed demo data
-npm run dev            # http://localhost:4000
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env && set -a && source .env && set +a   # DATABASE_URL etc.
+alembic upgrade head
+python -m app.seed               # wipes data and loads short-window demo data
+uvicorn app.main:app --reload --port 4000   # http://localhost:4000
 
 # 2. Frontend (new terminal)
 cd frontend
@@ -27,11 +29,11 @@ npm install
 npm run dev            # http://localhost:5173  (proxies /api -> :4000)
 ```
 
-Tests: `cd backend && npm test`. The unit tests don't need a database.
+Alternatively, `docker compose up --build` runs Postgres and the API container together (API on :4000, with demo data seeded into an empty DB).
 
-Re-seed at any time with `npm run db:seed`. **This wipes all data** and creates RFQs relative to *now*, so there are always auctions that are active, already in their trigger window, upcoming, and closed.
+**Tests**: `cd backend && pytest`. They cover the pure engine, validation and the HTTP API, including a concurrent-bid test. The API tests need Postgres: they create and migrate a throwaway `rfq_test` database, set by `TEST_DATABASE_URL`, which defaults to `postgresql://postgres:postgres@localhost:5432/rfq_test`. CI (`.github/workflows/ci.yml`) runs them against a Postgres service and also builds the frontend.
 
-If you already run Postgres without Docker, create a database and point `DATABASE_URL` in `backend/.env` at it.
+You can re-seed at any time with `python -m app.seed`. **This wipes all data** and creates RFQs relative to *now*, so there are always auctions that are active, already in their trigger window, upcoming, and closed. `python -m app.seed --demo` uses 1–2 week windows instead and only seeds an empty DB.
 
 ## Deployment (Render + Vercel)
 
@@ -39,12 +41,16 @@ If you already run Postgres without Docker, create a database and point `DATABAS
 1. Push this repo to GitHub.
 2. In Render, go to **New → Blueprint**, select the repo, and apply. `render.yaml` creates:
    - `gocomet-british-db`: a free Postgres database.
-   - `gocomet-british-api`: a Node web service with `rootDir: backend`.
-     - Build: `npm ci && npx prisma generate && npm run build`.
-     - Start: `npm start`, which runs `prisma migrate deploy && node dist/index.js`.
-     - Health check: `/api/health`. `DATABASE_URL` is wired to the database automatically.
+   - `gocomet-british-api`: a Python web service with `rootDir: backend`.
+     - Build: `pip install -r requirements.txt`.
+     - Start: `bash start.sh`. This runs `alembic upgrade head`, then `python -m app.seed --demo` if `SEED_DEMO=true` (empty DB only), then `uvicorn` on `$PORT`.
+     - Health check: `/api/health`. `DATABASE_URL` is wired to the database automatically, and the `postgresql://` URL Render gives is converted to `postgresql+psycopg://` in code.
 3. Leave `CORS_ORIGIN` empty for now. Once deployed, note the URL, e.g. `https://gocomet-british-api.onrender.com`, and check that `/api/health` returns `{"ok":true}`.
-4. (Optional) To load demo data, open **Shell** on the web service and run `npm run db:seed`. This wipes existing data.
+4. Demo data: `SEED_DEMO=true` (set in `render.yaml`) seeds only when the DB is empty. To force a fresh short-window dataset, run `python -m app.seed` from the service **Shell**. This wipes existing data.
+
+**Switching an existing Render deployment from the old Node backend**
+- **Runtime**: change `runtime: node` → `python`. Render's docs say you can do this with a Blueprint sync, or in the Dashboard under **Settings → Build → Source → Edit**. If the sync rejects it, change it in the Dashboard with the build/start commands above, or create a new Python service.
+- **Database**: the first Alembic migration **drops the old Prisma tables** (`Supplier`, `Rfq`, `Bid`, `ActivityLog`, `_prisma_migrations`) and recreates them. Existing data is discarded, and the demo seed then repopulates the empty DB. See [SCHEMA](docs/SCHEMA.md#migrating-from-the-prisma-schema).
 
 **2. Frontend on Vercel**
 1. In Vercel, go to **Add New → Project** and import the repo.
@@ -101,11 +107,11 @@ curl -X POST localhost:4000/api/rfqs -H 'content-type: application/json' -d '{
   - `L1_CHANGE`: extends only if the L1 supplier changes. The first bid on an RFQ counts, because L1 goes from none to that supplier. L1 lowering its own price does **not** count.
 - **Extension**: `newClose = min(currentClose + Y, forcedClose)`. Once `currentClose == forcedClose`, no more extensions happen.
 - **Status**: Upcoming (before start), Active, Closed (ended at a close time earlier than forced close), Force Closed (bidding ran until the forced close time).
-- **Concurrency**: bid processing is serialized per RFQ (in-process keyed mutex plus a DB transaction). See [HLD](docs/HLD.md#concurrency).
+- **Concurrency**: each bid runs in one DB transaction that first takes `SELECT ... FOR UPDATE` on the RFQ row, so bids on the same RFQ are serialized even across multiple API instances. See [HLD](docs/HLD.md#concurrency).
 
 ## Assumptions
 - There is no authentication. The supplier dropdown simulates identity, and the buyer is implicit.
 - Times are stored in UTC and shown in the browser's local timezone.
 - Currency is a single unit, shown as USD.
-- The API runs as a single instance. Scaling out needs the DB-level locking and Redis pub/sub described in the HLD.
+- Bid locking already works across instances, because it uses a Postgres row lock. The SSE event bus is in-process, so running more than one instance needs Redis pub/sub (see HLD). Close notifications via Celery + Redis are described in the HLD but not implemented.
 - Transit time is in whole days. "Validity of quote" is a date.

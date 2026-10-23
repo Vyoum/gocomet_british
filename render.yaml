@@ -1,11 +1,11 @@
 services:
   - type: web
     name: gocomet-british-api
-    runtime: node
+    runtime: python
     rootDir: backend
     plan: free
-    buildCommand: npm ci && npx prisma generate && npm run build
-    startCommand: npm start # prisma migrate deploy && node dist/index.js
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash start.sh # alembic upgrade head -> seed demo if SEED_DEMO=true and DB empty -> uvicorn
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
@@ -14,8 +14,10 @@ services:
           property: connectionString
       - key: CORS_ORIGIN
         sync: false # set to your Vercel URL after deploying the frontend
-      - key: NODE_VERSION
-        value: "20"
+      - key: SEED_DEMO
+        value: "true"
+      - key: PYTHON_VERSION
+        value: "3.12.8"
 
 databases:
   - name: gocomet-british-db

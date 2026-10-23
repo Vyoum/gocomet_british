@@ -1,6 +1,6 @@
 # Database Schema
 
-Prisma schema: [`backend/prisma/schema.prisma`](../backend/prisma/schema.prisma). It uses PostgreSQL (local via docker-compose, production via Render Postgres).
+SQLAlchemy models: [`backend/app/models.py`](../backend/app/models.py). Migration: [`backend/alembic/versions/0001_initial.py`](../backend/alembic/versions/0001_initial.py). It uses PostgreSQL (local via docker-compose, production via Render Postgres). Table and column names are the same as the earlier Prisma schema (quoted camelCase), and all timestamps are `timestamptz`. IDs are UUID strings stored as `text`.
 
 ```mermaid
 erDiagram
@@ -67,10 +67,22 @@ Carriers who bid. `name` is unique. There is no auth, so the UI picks a supplier
 Status is **not stored**. It is derived from the timestamps (see HLD).
 
 ### `Bid`
-Append-only. A re-bid inserts a new row, and ranking uses each supplier's latest row. All money columns are **integers in minor units** (paise/cents), so arithmetic and comparisons have no float rounding errors. The API accepts and returns decimal amounts (at most 2 decimal places) and converts at the boundary (`src/lib/money.ts`). `totalPrice` is denormalized (it is the sum of the three charges) so that sorting is cheap. Index: `(rfqId, supplierId, createdAt)`.
+Append-only. A re-bid inserts a new row, and ranking uses each supplier's latest row. All money columns are **integers in minor units** (paise/cents), so arithmetic and comparisons have no float rounding errors. The API accepts and returns decimal amounts (at most 2 decimal places) and converts at the boundary (`app/money.py`). `totalPrice` is denormalized (it is the sum of the three charges) so that sorting is cheap. Index: `(rfqId, supplierId, createdAt)`.
 
 ### `ActivityLog`
 Append-only audit trail of RFQ creation, bids, and extensions. `message` is human-readable, e.g. *"Close time extended 17:55 → 18:00. Reason: New L1 (lowest bidder): Maersk Line within last 10 min; extended by 5 min"*. `metadata` holds structured JSON (bid id, from/to times, capped flag). Index: `(rfqId, createdAt)`.
+
+## Constraints
+| Table | CHECK |
+|---|---|
+| Rfq | `bidCloseTime > bidStartTime`, `forcedCloseTime > bidCloseTime`, `currentCloseTime <= forcedCloseTime`, `currentCloseTime >= bidCloseTime`, `triggerWindowMinutes > 0 AND extensionMinutes > 0`, `triggerType IN (...)` |
+| Bid | charges `>= 0`, `totalPrice > 0`, `transitTimeDays > 0` |
+| ActivityLog | `type IN ('RFQ_CREATED','BID_PLACED','EXTENDED')` |
+
+Foreign keys: `Bid.rfqId` and `ActivityLog.rfqId` cascade on delete; `Bid.supplierId` restricts.
+
+## Migrating from the Prisma schema
+The first Alembic migration (`0001_initial`) runs `DROP TABLE IF EXISTS ... CASCADE` on `Supplier`, `Rfq`, `Bid`, `ActivityLog` and `_prisma_migrations`, then creates the tables fresh. **On a database the old Node backend used (e.g. the live Render DB), the existing rows are discarded.** With `SEED_DEMO=true`, `start.sh` then repopulates the now-empty DB with demo data. Alembic records the revision in `alembic_version`, so the drop runs only once per database.
 
 ## Notes
 Optional improvements: native enums for `triggerType`/`type`, and `jsonb` for `metadata`. Both are stored as strings today to keep the schema simple.

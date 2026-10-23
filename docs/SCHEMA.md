@@ -31,10 +31,10 @@ erDiagram
     uuid id PK
     uuid rfqId FK
     uuid supplierId FK
-    float freightCharges
-    float originCharges
-    float destinationCharges
-    float totalPrice "sum, used for ranking"
+    int freightCharges "minor units"
+    int originCharges "minor units"
+    int destinationCharges "minor units"
+    int totalPrice "minor units, sum, used for ranking"
     int transitTimeDays
     datetime quoteValidUntil
     datetime createdAt
@@ -67,10 +67,10 @@ Carriers who bid. `name` is unique. There is no auth, so the UI picks a supplier
 Status is **not stored**. It is derived from the timestamps (see HLD).
 
 ### `Bid`
-Append-only. A re-bid inserts a new row, and ranking uses each supplier's latest row. `totalPrice` is denormalized (it is the sum of the three charges) so that sorting is cheap. Index: `(rfqId, supplierId, createdAt)`.
+Append-only. A re-bid inserts a new row, and ranking uses each supplier's latest row. All money columns are **integers in minor units** (paise/cents), so arithmetic and comparisons have no float rounding errors. The API accepts and returns decimal amounts (at most 2 decimal places) and converts at the boundary (`src/lib/money.ts`). `totalPrice` is denormalized (it is the sum of the three charges) so that sorting is cheap. Index: `(rfqId, supplierId, createdAt)`.
 
 ### `ActivityLog`
 Append-only audit trail of RFQ creation, bids, and extensions. `message` is human-readable, e.g. *"Close time extended 17:55 → 18:00. Reason: New L1 (lowest bidder): Maersk Line within last 10 min; extended by 5 min"*. `metadata` holds structured JSON (bid id, from/to times, capped flag). Index: `(rfqId, createdAt)`.
 
 ## Postgres notes
-To use Postgres, switch the `provider` and regenerate the migrations. Optional improvements for Postgres: use `Decimal(12,2)` for money, native enums for `triggerType`/`type`, and `jsonb` for `metadata`.
+To use Postgres, switch the `provider` and regenerate the migrations. Optional improvements for Postgres: native enums for `triggerType`/`type`, and `jsonb` for `metadata`.

@@ -30,7 +30,8 @@ async function main() {
 
   const bid = (rfqId: string, supplierId: string, f: number, o: number, d: number, m: number) =>
     prisma.bid.create({
-      data: { rfqId, supplierId, freightCharges: f, originCharges: o, destinationCharges: d, totalPrice: f + o + d, transitTimeDays: 21, quoteValidUntil: at(60 * 24 * 30), createdAt: at(m) },
+      data: { rfqId, supplierId, // amounts given in major units, stored as minor units
+        freightCharges: f * 100, originCharges: o * 100, destinationCharges: d * 100, totalPrice: (f + o + d) * 100, transitTimeDays: 21, quoteValidUntil: at(60 * 24 * 30), createdAt: at(m) },
     });
   await bid(active.id, s[0].id, 2000, 150, 200, -25);
   await bid(active.id, s[1].id, 1900, 120, 180, -20);

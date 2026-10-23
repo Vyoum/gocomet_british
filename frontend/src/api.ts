@@ -16,6 +16,11 @@ export interface RfqDetails extends Omit<RfqSummary, 'lowestBid' | 'bidCount' | 
   serverTime: string; rankedBids: Bid[]; allBids: Bid[]; activity: Activity[];
 }
 
+/** Server clock minus client clock (ms); countdowns use this so a skewed client clock doesn't matter. */
+let clockOffset = 0;
+export const serverNow = () => Date.now() + clockOffset;
+const syncClock = (serverTime?: string) => { if (serverTime) clockOffset = new Date(serverTime).getTime() - Date.now(); };
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(BASE + path, { headers: { 'Content-Type': 'application/json' }, ...init });
   const j = await r.json();
@@ -24,8 +29,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 export const api = {
   suppliers: () => req<Supplier[]>('/suppliers'),
-  rfqs: () => req<RfqSummary[]>('/rfqs'),
-  rfq: (id: string) => req<RfqDetails>(`/rfqs/${id}`),
+  rfqs: () => req<{ serverTime: string; rfqs: RfqSummary[] }>('/rfqs').then((r) => { syncClock(r.serverTime); return r.rfqs; }),
+  rfq: (id: string) => req<RfqDetails>(`/rfqs/${id}`).then((r) => { syncClock(r.serverTime); return r; }),
   createRfq: (b: unknown) => req<{ id: string }>('/rfqs', { method: 'POST', body: JSON.stringify(b) }),
   placeBid: (id: string, b: unknown) => req<{ rank: number; extension: { extend: boolean; reason: string } }>(`/rfqs/${id}/bids`, { method: 'POST', body: JSON.stringify(b) }),
 };
@@ -34,6 +39,7 @@ export const api = {
 export function subscribe(onChange: (rfqId: string) => void): () => void {
   let poll: number | undefined;
   const es = new EventSource(BASE + '/events');
+  es.onopen = () => onChange('*'); // (re)connected: refetch anything missed while disconnected
   es.onmessage = (e) => onChange(JSON.parse(e.data).rfqId);
   es.onerror = () => { if (!poll) poll = window.setInterval(() => onChange('*'), 5000); };
   return () => { es.close(); if (poll) clearInterval(poll); };

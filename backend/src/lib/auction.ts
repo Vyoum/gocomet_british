@@ -1,8 +1,8 @@
 /**
  * Pure British Auction logic (no DB) — unit tested in tests/auction.test.ts.
  */
-export type TriggerType = 'BID_RECEIVED' | 'ANY_RANK_CHANGE' | 'L1_CHANGE';
-export const TRIGGER_TYPES: TriggerType[] = ['BID_RECEIVED', 'ANY_RANK_CHANGE', 'L1_CHANGE'];
+export type TriggerType = (typeof TRIGGER_TYPES)[number];
+export const TRIGGER_TYPES = ['BID_RECEIVED', 'ANY_RANK_CHANGE', 'L1_CHANGE'] as const;
 export type AuctionStatus = 'UPCOMING' | 'ACTIVE' | 'CLOSED' | 'FORCE_CLOSED';
 
 export interface BidLike {

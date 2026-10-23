@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Status } from '../api';
+import { serverNow, type Status } from '../api';
 
 const styles: Record<Status, string> = {
   UPCOMING: 'bg-sky-100 text-sky-800', ACTIVE: 'bg-green-100 text-green-800',
@@ -13,8 +13,8 @@ export const fmtMoney = (n: number | null | undefined) => (n == null ? '—' : n
 export const triggerLabel = { BID_RECEIVED: 'Bid received in last X min', ANY_RANK_CHANGE: 'Any supplier rank change in last X min', L1_CHANGE: 'L1 (lowest bidder) change in last X min' } as const;
 
 export function useNow(ms = 1000) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), ms); return () => clearInterval(t); }, [ms]);
+  const [now, setNow] = useState(serverNow());
+  useEffect(() => { const t = setInterval(() => setNow(serverNow()), ms); return () => clearInterval(t); }, [ms]);
   return now;
 }
 

@@ -40,10 +40,10 @@ model Bid {
   id                 String   @id @default(uuid())
   rfqId              String
   supplierId         String
-  freightCharges     Float
-  originCharges      Float
-  destinationCharges Float
-  totalPrice         Float
+  freightCharges     Int // all money columns: integer minor units
+  originCharges      Int
+  destinationCharges Int
+  totalPrice         Int // minor units (paise/cents), sum of the three charges
   transitTimeDays    Int
   quoteValidUntil    DateTime
   createdAt          DateTime @default(now())

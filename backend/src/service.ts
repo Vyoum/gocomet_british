@@ -2,6 +2,7 @@ import { prisma } from './lib/db';
 import { KeyedMutex } from './lib/mutex';
 import { HttpError } from './lib/errors';
 import { emitRfqUpdate } from './lib/events';
+import { fromMinor } from './lib/money';
 import { evaluateExtension, getStatus, rankBids, rankingOrder, TriggerType, validateRfqTimes } from './lib/auction';
 
 const mutex = new KeyedMutex();
@@ -39,6 +40,7 @@ export async function createRfq(input: CreateRfqInput) {
   return rfq;
 }
 
+/** Charges are integer minor units (converted from decimals at the API boundary). */
 export interface PlaceBidInput {
   supplierId: string;
   freightCharges: number;
@@ -64,13 +66,14 @@ export async function placeBid(rfqId: string, input: PlaceBidInput, now: () => D
       const status = getStatus(rfq, at);
       if (status !== 'ACTIVE') throw new HttpError(409, `Bidding not open (status: ${status})`);
 
-      const totalPrice = round2(input.freightCharges + input.originCharges + input.destinationCharges);
+      const totalPrice = input.freightCharges + input.originCharges + input.destinationCharges;
       if (totalPrice <= 0) throw new HttpError(400, 'Total price must be > 0');
+      if (input.quoteValidUntil <= at) throw new HttpError(400, 'Quote validity must be in the future');
 
       const existing = await tx.bid.findMany({ where: { rfqId }, select: { supplierId: true, totalPrice: true, createdAt: true } });
       const prevOwn = rankBids(existing).find((b) => b.supplierId === supplier.id);
       if (prevOwn && totalPrice >= prevOwn.totalPrice)
-        throw new HttpError(400, `Re-bid must be lower than your previous bid of ${prevOwn.totalPrice}`);
+        throw new HttpError(400, `Re-bid must be lower than your previous bid of ${money(prevOwn.totalPrice)}`);
 
       const before = rankingOrder(existing);
       const bid = await tx.bid.create({ data: { rfqId, ...input, totalPrice, createdAt: at } });
@@ -81,8 +84,8 @@ export async function placeBid(rfqId: string, input: PlaceBidInput, now: () => D
         data: {
           rfqId,
           type: 'BID_PLACED',
-          message: `${supplier.name} ${prevOwn ? 're-bid' : 'bid'} ${totalPrice.toFixed(2)} (now L${rank})`,
-          metadata: JSON.stringify({ bidId: bid.id, totalPrice, rank }),
+          message: `${supplier.name} ${prevOwn ? 're-bid' : 'bid'} ${money(totalPrice)} (now L${rank})`,
+          metadata: JSON.stringify({ bidId: bid.id, totalPrice: fromMinor(totalPrice), rank }),
           createdAt: at,
         },
       });
@@ -114,28 +117,39 @@ export async function placeBid(rfqId: string, input: PlaceBidInput, now: () => D
           },
         });
       }
-      return { bid, rank, extension: decision };
+      return { bid: bidToApi(bid), rank, extension: decision };
     }),
   );
   emitRfqUpdate(rfqId);
   return result;
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+const money = (minor: number) => fromMinor(minor).toFixed(2);
+/** Convert a bid row's minor-unit money fields to decimal amounts for the API. */
+function bidToApi<T extends { freightCharges: number; originCharges: number; destinationCharges: number; totalPrice: number }>(b: T): T {
+  return {
+    ...b,
+    freightCharges: fromMinor(b.freightCharges),
+    originCharges: fromMinor(b.originCharges),
+    destinationCharges: fromMinor(b.destinationCharges),
+    totalPrice: fromMinor(b.totalPrice),
+  };
+}
 const fmt = (d: Date) => d.toISOString().replace('T', ' ').slice(0, 19) + 'Z';
 
 export async function listRfqs(now = new Date()) {
   const rfqs = await prisma.rfq.findMany({ include: { bids: true }, orderBy: { bidStartTime: 'desc' } });
-  return rfqs.map(({ bids, ...r }) => {
+  const items = rfqs.map(({ bids, ...r }) => {
     const ranked = rankBids(bids);
     return {
       ...r,
       status: getStatus(r, now),
-      lowestBid: ranked[0]?.totalPrice ?? null,
+      lowestBid: ranked[0] ? fromMinor(ranked[0].totalPrice) : null,
       bidCount: bids.length,
       supplierCount: ranked.length,
     };
   });
+  return { serverTime: now, rfqs: items };
 }
 
 export async function getRfqDetails(id: string, now = new Date()) {
@@ -145,13 +159,13 @@ export async function getRfqDetails(id: string, now = new Date()) {
   });
   if (!rfq) throw new HttpError(404, 'RFQ not found');
   const { bids, activity, ...r } = rfq;
-  const ranked = rankBids(bids).map((b) => ({ ...b, supplierName: b.supplier.name, label: `L${b.rank}` }));
+  const ranked = rankBids(bids).map((b) => ({ ...bidToApi(b), supplierName: b.supplier.name, label: `L${b.rank}` }));
   return {
     ...r,
     status: getStatus(r, now),
     serverTime: now,
     rankedBids: ranked,
-    allBids: bids.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).map((b) => ({ ...b, supplierName: b.supplier.name })),
+    allBids: bids.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).map((b) => ({ ...bidToApi(b), supplierName: b.supplier.name })),
     activity,
   };
 }

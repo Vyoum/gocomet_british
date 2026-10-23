@@ -48,13 +48,15 @@ Updates are pushed over **Server-Sent Events** (`/api/events`). If SSE fails, th
 |---|---|---|
 | GET | `/api/health` | Health check |
 | GET | `/api/suppliers` | List suppliers (demo identities) |
-| GET | `/api/rfqs` | List auctions with status, lowest bid, bid count |
+| GET | `/api/rfqs` | `{ serverTime, rfqs }`: auctions with status, lowest bid, bid count |
 | POST | `/api/rfqs` | Create RFQ. Body: `referenceId, name, bidStartTime, bidCloseTime, forcedCloseTime, pickupDate, triggerWindowMinutes, extensionMinutes, triggerType` (`BID_RECEIVED`/`ANY_RANK_CHANGE`/`L1_CHANGE`) |
 | GET | `/api/rfqs/:id` | Details: ranked bids, all bids, activity log, status, server time |
 | POST | `/api/rfqs/:id/bids` | Place a bid. Body: `supplierId, freightCharges, originCharges, destinationCharges, transitTimeDays, quoteValidUntil`. Returns `{ bid, rank, extension }` |
 | GET | `/api/events` | SSE stream; emits `{rfqId}` whenever an RFQ changes |
 
-Errors come back as `{ error, details? }` with status 400 (validation), 404, or 409 (bidding not open / duplicate ref ID).
+Errors come back as `{ error, details? }` with status 400 (validation, malformed JSON), 404, or 409 (bidding not open / duplicate ref ID). Numbers and dates are parsed strictly: empty strings and `null` are rejected, and numeric strings are accepted only if non-empty.
+
+Countdowns use the `serverTime` returned by the list and details endpoints, so a wrong client clock doesn't affect them. The client also refetches whenever the SSE connection (re)opens.
 
 Example:
 ```bash
@@ -65,7 +67,8 @@ curl -X POST localhost:4000/api/rfqs -H 'content-type: application/json' -d '{
 ```
 
 ## Auction rules as implemented
-- **Total price** = freight + origin + destination. Bids are ranked by this total.
+- **Total price** = freight + origin + destination, and must be > 0. Bids are ranked by this total. Money is stored as integer minor units (paise/cents); the API takes and returns decimal amounts with at most 2 decimal places.
+- **Quote validity** must be in the future.
 - **Ranking**: only each supplier's **latest** bid counts. Lower total ranks higher. On a tie, the earlier bid ranks higher.
 - **Re-bids** are allowed, but each one must be **strictly lower** than the supplier's own previous bid. That matches the "continuously lower prices" idea of a British auction and stops a supplier from gaming ranks by raising a bid. A supplier does *not* have to beat L1.
 - **Bids are accepted only while the auction is Active**: `bidStartTime <= now < currentCloseTime`.

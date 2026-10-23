@@ -12,3 +12,9 @@ def from_minor(minor: int) -> int | float:
 
 def fmt_money(minor: int) -> str:
     return f"{minor / 100:.2f}"
+
+
+def fmt_currency(minor: int) -> str:
+    """Human-facing amount, e.g. 235000 -> '$2,350.00' (matches the frontend's USD formatting)."""
+    sign = "-" if minor < 0 else ""
+    return f"{sign}${abs(minor) / 100:,.2f}"

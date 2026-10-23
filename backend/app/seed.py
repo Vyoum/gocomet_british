@@ -38,9 +38,9 @@ BIDS = [
     ("RFQ-0999", 4, 850, 60, 40, -150),
 ]
 MESSAGES = [
-    ("RFQ-1001", "BlueDart Logistics bid 2350.00 (now L1)", -25),
-    ("RFQ-1001", "Maersk Line bid 2200.00 (now L1)", -20),
-    ("RFQ-1001", "DHL Global Forwarding bid 2350.00 (now L3)", -15),
+    ("RFQ-1001", "BlueDart Logistics bid $2,350.00 (now L1)", -25),
+    ("RFQ-1001", "Maersk Line bid $2,200.00 (now L1)", -20),
+    ("RFQ-1001", "DHL Global Forwarding bid $2,350.00 (now L3)", -15),
     ("RFQ-0999", "Gati Cargo bid 1000.00 (now L1)", -200),
     ("RFQ-0999", "Safexpress bid 950.00 (now L1)", -150),
 ]

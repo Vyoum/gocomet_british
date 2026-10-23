@@ -11,7 +11,7 @@ from .auction import ExtensionInput, SimpleBid, evaluate_extension, get_status, 
 from .errors import HttpError
 from .events import bus
 from .models import ActivityLog, Bid, Rfq, Supplier
-from .money import fmt_money, from_minor
+from .money import fmt_currency, from_minor
 from .schemas import BidIn, RfqIn
 from .serialize import activity_out, bid_out, iso, rfq_out, supplier_out
 
@@ -142,7 +142,7 @@ async def place_bid(
         existing = [SimpleBid(r[0], r[1], r[2]) for r in rows]
         prev_own = next((b for _, b in rank_bids(existing) if b.supplier_id == supplier.id), None)
         if prev_own and total >= prev_own.total_price:
-            raise HttpError(400, f"Re-bid must be lower than your previous bid of {fmt_money(prev_own.total_price)}")
+            raise HttpError(400, f"Re-bid must be lower than your previous bid of {fmt_currency(prev_own.total_price)}")
 
         before = ranking_order(existing)
         bid = Bid(
@@ -167,7 +167,7 @@ async def place_bid(
             ActivityLog(
                 rfq_id=rfq_id,
                 type="BID_PLACED",
-                message=f"{supplier.name} {'re-bid' if prev_own else 'bid'} {fmt_money(total)} (now L{rank})",
+                message=f"{supplier.name} {'re-bid' if prev_own else 'bid'} {fmt_currency(total)} (now L{rank})",
                 metadata_=json.dumps({"bidId": bid.id, "totalPrice": from_minor(total), "rank": rank}),
                 created_at=at,
             )

@@ -9,8 +9,8 @@ import DetailsPage from './pages/DetailsPage';
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <header className="border-b bg-white"><div className="mx-auto max-w-7xl px-4 py-3"><Link to="/" className="font-bold text-indigo-700">RFQ · British Auction</Link></div></header>
-      <main className="mx-auto max-w-7xl p-4">
+      <header className="border-b bg-white"><div className="mx-auto flex max-w-7xl items-center px-4"><Link to="/" className="inline-flex min-h-[48px] items-center font-bold text-indigo-700">RFQ · British Auction</Link></div></header>
+      <main className="mx-auto max-w-7xl p-3 sm:p-4">
         <Routes>
           <Route path="/" element={<ListPage />} />
           <Route path="/new" element={<CreatePage />} />

@@ -44,11 +44,11 @@ export default function CreatePage() {
         <div><label className="label">Forced Bid Close Date & Time</label><input required type="datetime-local" className="input" value={f.forcedCloseTime} onChange={set('forcedCloseTime')} /></div>
         <div><label className="label">Pickup / Service Date</label><input required type="datetime-local" className="input" value={f.pickupDate} onChange={set('pickupDate')} /></div>
       </section>
-      <section className="rounded border border-indigo-100 bg-indigo-50/50 p-4">
+      <section className="rounded border border-indigo-100 bg-indigo-50/50 p-3 sm:p-4">
         <h2 className="mb-3 text-sm font-semibold text-indigo-900">British Auction Configuration</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div><label className="label">Trigger Window X (minutes)</label><input required type="number" min={1} className="input" value={f.triggerWindowMinutes} onChange={set('triggerWindowMinutes')} /></div>
-          <div><label className="label">Extension Duration Y (minutes)</label><input required type="number" min={1} className="input" value={f.extensionMinutes} onChange={set('extensionMinutes')} /></div>
+          <div><label className="label">Trigger Window X (minutes)</label><input required type="number" inputMode="numeric" min={1} className="input" value={f.triggerWindowMinutes} onChange={set('triggerWindowMinutes')} /></div>
+          <div><label className="label">Extension Duration Y (minutes)</label><input required type="number" inputMode="numeric" min={1} className="input" value={f.extensionMinutes} onChange={set('extensionMinutes')} /></div>
           <div><label className="label">Extension Trigger</label>
             <select className="input" value={f.triggerType} onChange={set('triggerType')}>
               {(Object.keys(triggerLabel) as TriggerType[]).map((t) => <option key={t} value={t}>{triggerLabel[t]}</option>)}
@@ -57,7 +57,7 @@ export default function CreatePage() {
         <p className="mt-3 text-xs text-slate-600">If the trigger fires in the last {f.triggerWindowMinutes} min before the (current) close, the close extends by {f.extensionMinutes} min — never beyond the forced close.</p>
       </section>
       {[...clientErrors, err].filter(Boolean).map((m) => <p key={m} className="text-sm text-red-600">{m}</p>)}
-      <button className="btn" disabled={clientErrors.length > 0}>Create RFQ</button>
+      <button className="btn w-full sm:w-auto" disabled={clientErrors.length > 0}>Create RFQ</button>
     </form>
   );
 }

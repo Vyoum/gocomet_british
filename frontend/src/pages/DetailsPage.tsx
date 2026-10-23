@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, HttpError, RfqDetails, Supplier, subscribe } from '../api';
-import { Countdown, fmtDate, fmtMoney, StatusBadge, triggerLabel } from '../components/ui';
+import { Countdown, fmtDate, fmtMoney, StatusBadge, fmtActivity, triggerLabel } from '../components/ui';
 
 export default function DetailsPage() {
   const { id = '' } = useParams();
@@ -12,20 +12,20 @@ export default function DetailsPage() {
   if (!rfq) return <p className="text-slate-500">{err || 'Loading…'}</p>;
 
   return (
-    <div className="space-y-6">
-      <Link to="/" className="text-sm text-indigo-700">← All auctions</Link>
+    <div className="space-y-4 sm:space-y-6">
+      <Link to="/" className="inline-block py-1 text-sm text-indigo-700">← All auctions</Link>
       <div className="card">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold">{rfq.name} <StatusBadge s={rfq.status} /></h1>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="min-w-0">
+            <h1 className="break-words text-lg font-semibold sm:text-xl">{rfq.name} <StatusBadge s={rfq.status} /></h1>
             <p className="text-sm text-slate-500">{rfq.referenceId} · Pickup {fmtDate(rfq.pickupDate)}</p>
           </div>
-          <div className="text-right">
+          <div className="sm:text-right">
             <div className="text-xs uppercase text-slate-500">Time remaining</div>
-            <div className="text-2xl"><Countdown to={rfq.currentCloseTime} from={rfq.bidStartTime} onZero={load} /></div>
+            <div className="text-xl sm:text-2xl"><Countdown to={rfq.currentCloseTime} from={rfq.bidStartTime} onZero={load} /></div>
           </div>
         </div>
-        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+        <dl className="mt-4 grid grid-cols-1 gap-3 text-sm min-[380px]:grid-cols-2 md:grid-cols-4">
           <Info k="Bid start" v={fmtDate(rfq.bidStartTime)} />
           <Info k="Original close" v={fmtDate(rfq.bidCloseTime)} />
           <Info k="Current close" v={`${fmtDate(rfq.currentCloseTime)}${rfq.extensionCount ? ` (+${rfq.extensionCount} ext)` : ''}`} />
@@ -36,8 +36,28 @@ export default function DetailsPage() {
         </dl>
       </div>
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="card overflow-x-auto p-0 lg:col-span-2">
-          <h2 className="p-5 pb-2 font-semibold">Ranking (latest bid per supplier)</h2>
+        <div className="card min-w-0 p-0 lg:col-span-2">
+          <h2 className="p-4 pb-2 font-semibold sm:p-5 sm:pb-2">Ranking (latest bid per supplier)</h2>
+          <ul className="space-y-2 px-4 pb-4 md:hidden" data-testid="rank-cards">
+            {rfq.rankedBids.map((b) => (
+              <li key={b.id} className={`rounded border p-3 text-sm ${b.rank === 1 ? 'border-green-300 bg-green-50' : 'border-slate-200'}`}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="min-w-0 break-words"><b className="mr-2">{b.label}</b>{b.supplierName}</span>
+                  <span className="shrink-0 font-semibold">{fmtMoney(b.totalPrice)}</span>
+                </div>
+                <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                  <div><dt className="text-slate-500">Freight</dt><dd>{fmtMoney(b.freightCharges)}</dd></div>
+                  <div><dt className="text-slate-500">Origin</dt><dd>{fmtMoney(b.originCharges)}</dd></div>
+                  <div><dt className="text-slate-500">Destination</dt><dd>{fmtMoney(b.destinationCharges)}</dd></div>
+                  <div><dt className="text-slate-500">Transit</dt><dd>{b.transitTimeDays} d</dd></div>
+                  <div><dt className="text-slate-500">Valid until</dt><dd>{new Date(b.quoteValidUntil).toLocaleDateString()}</dd></div>
+                  <div><dt className="text-slate-500">Bid at</dt><dd>{fmtDate(b.createdAt)}</dd></div>
+                </dl>
+              </li>
+            ))}
+            {!rfq.rankedBids.length && <li className="text-sm text-slate-500">No bids yet.</li>}
+          </ul>
+          <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50"><tr>{['Rank', 'Carrier', 'Freight', 'Origin', 'Destination', 'Total', 'Transit', 'Valid until', 'Bid at'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100">
@@ -52,9 +72,10 @@ export default function DetailsPage() {
               {!rfq.rankedBids.length && <tr><td colSpan={9} className="td text-slate-500">No bids yet.</td></tr>}
             </tbody>
           </table>
+          </div>
           {rfq.allBids.length > rfq.rankedBids.length && (
-            <details className="p-5 text-sm"><summary className="cursor-pointer text-slate-600">All bids incl. superseded ({rfq.allBids.length})</summary>
-              <ul className="mt-2 space-y-1">{rfq.allBids.map((b) => <li key={b.id}>{fmtDate(b.createdAt)} — {b.supplierName}: {fmtMoney(b.totalPrice)}</li>)}</ul>
+            <details className="p-4 text-sm sm:p-5"><summary className="cursor-pointer text-slate-600">All bids incl. superseded ({rfq.allBids.length})</summary>
+              <ul className="mt-2 space-y-1">{rfq.allBids.map((b) => <li key={b.id} className="break-words">{fmtDate(b.createdAt)} — {b.supplierName}: {fmtMoney(b.totalPrice)}</li>)}</ul>
             </details>)}
         </div>
         <BidForm rfq={rfq} onDone={load} />
@@ -63,10 +84,10 @@ export default function DetailsPage() {
         <h2 className="mb-3 font-semibold">Activity log</h2>
         <ul className="space-y-2 text-sm">
           {rfq.activity.map((a) => (
-            <li key={a.id} className="flex gap-3">
-              <span className="w-44 shrink-0 text-xs text-slate-500">{fmtDate(a.createdAt)}</span>
-              <span title={a.type} className={`shrink-0 rounded px-1.5 text-xs font-semibold ${ACTIVITY_STYLE[a.type]?.cls ?? 'bg-slate-100'}`}>{ACTIVITY_STYLE[a.type]?.label ?? a.type}</span>
-              <span>{a.message}</span>
+            <li key={a.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-slate-100 pb-2 last:border-0 sm:flex-nowrap sm:border-0 sm:pb-0">
+              <span className="shrink-0 text-xs text-slate-500 sm:w-44">{fmtDate(a.createdAt)}</span>
+              <span title={a.type} className={`shrink-0 whitespace-nowrap rounded px-1.5 text-xs font-semibold ${ACTIVITY_STYLE[a.type]?.cls ?? 'bg-slate-100'}`}>{ACTIVITY_STYLE[a.type]?.label ?? a.type}</span>
+              <span className="min-w-0 basis-full break-words sm:basis-auto">{fmtActivity(a.message)}</span>
             </li>
           ))}
         </ul>
@@ -85,7 +106,7 @@ const ACTIVITY_STYLE: Record<string, { label: string; cls: string }> = {
 };
 
 const Info = ({ k, v, wide }: { k: string; v: string; wide?: boolean }) => (
-  <div className={wide ? 'col-span-2' : ''}><dt className="text-xs text-slate-500">{k}</dt><dd className="font-medium">{v}</dd></div>
+  <div className={`min-w-0 break-words ${wide ? 'min-[380px]:col-span-2' : ''}`}><dt className="text-xs text-slate-500">{k}</dt><dd className="font-medium">{v}</dd></div>
 );
 
 function BidForm({ rfq, onDone }: { rfq: RfqDetails; onDone: () => void }) {
@@ -122,20 +143,20 @@ function BidForm({ rfq, onDone }: { rfq: RfqDetails; onDone: () => void }) {
   }
   const open = rfq.status === 'ACTIVE';
   return (
-    <form onSubmit={submit} className="card space-y-3">
+    <form onSubmit={submit} className="card min-w-0 space-y-3">
       <h2 className="font-semibold">Submit quote</h2>
       <div><label className="label">Acting as carrier (demo — no auth)</label>
         <select className="input" value={f.supplierId} onChange={set('supplierId')}>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
         {mine && <p className="mt-1 text-xs text-slate-500">Your current bid: {fmtMoney(mine.totalPrice)} ({mine.label}). Re-bids must be lower.</p>}
       </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div><label className="label">Freight</label><input required type="number" min={0} step="0.01" className="input" value={f.freightCharges} onChange={set('freightCharges')} /></div>
-        <div><label className="label">Origin</label><input required type="number" min={0} step="0.01" className="input" value={f.originCharges} onChange={set('originCharges')} /></div>
-        <div><label className="label">Destination</label><input required type="number" min={0} step="0.01" className="input" value={f.destinationCharges} onChange={set('destinationCharges')} /></div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-2 lg:grid-cols-1 xl:grid-cols-3">
+        <div><label className="label">Freight</label><input required type="number" inputMode="decimal" min={0} step="0.01" className="input" value={f.freightCharges} onChange={set('freightCharges')} /></div>
+        <div><label className="label">Origin</label><input required type="number" inputMode="decimal" min={0} step="0.01" className="input" value={f.originCharges} onChange={set('originCharges')} /></div>
+        <div><label className="label">Destination</label><input required type="number" inputMode="decimal" min={0} step="0.01" className="input" value={f.destinationCharges} onChange={set('destinationCharges')} /></div>
       </div>
       <p className="text-sm">Total: <b>{fmtMoney(total)}</b></p>
-      <div className="grid grid-cols-2 gap-2">
-        <div><label className="label">Transit time (days)</label><input required type="number" min={1} className="input" value={f.transitTimeDays} onChange={set('transitTimeDays')} /></div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
+        <div><label className="label">Transit time (days)</label><input required type="number" inputMode="numeric" min={1} className="input" value={f.transitTimeDays} onChange={set('transitTimeDays')} /></div>
         <div><label className="label">Quote valid until</label><input required type="date" className="input" value={f.quoteValidUntil} onChange={set('quoteValidUntil')} /></div>
       </div>
       <button className="btn w-full" disabled={!open || busy} aria-busy={busy}>{busy ? 'Submitting…' : open ? 'Submit bid' : `Bidding ${rfq.status === 'UPCOMING' ? 'not started' : 'closed'}`}</button>

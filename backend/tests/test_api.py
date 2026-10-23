@@ -95,7 +95,7 @@ async def test_bid_flow_and_rules(client):
     assert r.status_code == 201 and j["rank"] == 1 and j["bid"]["totalPrice"] == 1150.5
     assert j["extension"]["extend"] and j["extension"]["cappedAtForcedClose"] is False
     r = await client.post(url, json=bid_body(sup[0]["id"], f=1000.5))
-    assert r.status_code == 400 and r.json()["error"] == "Re-bid must be lower than your previous bid of 1150.50"
+    assert r.status_code == 400 and r.json()["error"] == "Re-bid must be lower than your previous bid of $1,150.50"
     r = await client.post(url, json=bid_body(sup[1]["id"], f=2000))  # higher than L1 is fine (own first bid)
     assert r.status_code == 201 and r.json()["rank"] == 2
     assert r.json()["extension"]["cappedAtForcedClose"] is True  # 10+5 > 12 -> capped

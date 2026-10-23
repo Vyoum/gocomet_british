@@ -18,7 +18,7 @@ export interface Bid {
   id: string; supplierId: string; supplierName: string; freightCharges: number; originCharges: number; destinationCharges: number;
   totalPrice: number; transitTimeDays: number; quoteValidUntil: string; createdAt: string; rank?: number; label?: string;
 }
-export interface BidResult { rank: number; extension: { extend: boolean; cappedAtForcedClose: boolean; reason: string } }
+export interface BidResult { replayed?: boolean; rank: number; extension: { extend: boolean; cappedAtForcedClose: boolean; reason: string } }
 export interface Activity { id: string; type: string; message: string; createdAt: string }
 export interface RfqDetails extends Omit<RfqSummary, 'lowestBid' | 'bidCount' | 'supplierCount' | 'topRanks'> {
   serverTime: string; rankedBids: Bid[]; allBids: Bid[]; activity: Activity[];
@@ -31,9 +31,10 @@ const syncClock = (serverTime?: string) => { if (serverTime) clockOffset = new D
 
 export class HttpError extends Error { constructor(message: string, public status: number) { super(message); } }
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+async function req<T>(path: string, init?: RequestInit, onHeaders?: (h: Headers) => void): Promise<T> {
   const r = await fetch(BASE + path, { ...init, headers: { 'Content-Type': 'application/json', ...roleHeaders(), ...(init?.headers as Record<string, string> | undefined) } });
   const j = await r.json();
+  onHeaders?.(r.headers);
   if (!r.ok) throw new HttpError(j.details && Array.isArray(j.details) && j.details[0]?.message ? `${j.error}: ${j.details.map((d: any) => `${d.path?.join('.')} ${d.message}`).join(', ')}` : j.error, r.status);
   return j;
 }
@@ -47,7 +48,10 @@ export const api = {
   placeBid: async (id: string, b: unknown, idempotencyKey: string, retries = 2) => {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await req<BidResult>(`/rfqs/${id}/bids`, { method: 'POST', body: JSON.stringify(b), headers: { 'Idempotency-Key': idempotencyKey } });
+        let replayed = false;
+        const res = await req<BidResult>(`/rfqs/${id}/bids`, { method: 'POST', body: JSON.stringify(b), headers: { 'Idempotency-Key': idempotencyKey } },
+          (h) => { replayed = h.get('Idempotent-Replayed') === 'true'; });
+        return { ...res, replayed };
       } catch (e) {
         // Retry only transport failures / 5xx (outcome unknown); 4xx are final answers.
         const retryable = !(e instanceof HttpError) || e.status >= 500;

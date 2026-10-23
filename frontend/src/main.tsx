@@ -6,6 +6,8 @@ import ListPage from './pages/ListPage';
 import CreatePage from './pages/CreatePage';
 import DetailsPage from './pages/DetailsPage';
 import RoleSwitcher from './components/RoleSwitcher';
+import Toaster from './components/Toasts';
+import OutbidWatcher from './components/OutbidWatcher';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -18,6 +20,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/rfq/:id" element={<DetailsPage />} />
         </Routes>
       </main>
+      <Toaster />
+      <OutbidWatcher />
     </BrowserRouter>
   </React.StrictMode>,
 );

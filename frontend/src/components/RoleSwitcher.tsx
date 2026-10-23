@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, Supplier } from '../api';
 import { setRole, useRole } from '../role';
+import InfoTip from './InfoTip';
 
 /** Header control for the demo role switch (no auth). */
 export default function RoleSwitcher() {
@@ -36,6 +37,7 @@ export default function RoleSwitcher() {
         </optgroup>
         <option value="__new">+ New carrier…</option>
       </select>
+      <InfoTip label="Role restrictions (demo, not auth)">Your choice is sent as <code>X-Role</code> / <code>X-Supplier</code> headers. <b>Buyer</b>: can create RFQs; bids are rejected (403). <b>Supplier</b>: cannot create RFQs and may only bid as itself (server returns 403 otherwise); the listing shows your own rank. <b>Open demo</b> sends no headers, so everything is allowed. Headers are trusted as sent — real auth would replace this.</InfoTip>
       {adding && (
         <form onSubmit={add} className="flex w-full items-center gap-2 sm:w-auto">
           <input autoFocus aria-label="New carrier name" placeholder="Carrier name" className="input min-h-[40px] py-1 text-sm" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} required />

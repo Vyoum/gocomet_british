@@ -1,6 +1,6 @@
 # Database Schema
 
-Prisma schema: [`backend/prisma/schema.prisma`](../backend/prisma/schema.prisma). It uses SQLite by default and is Postgres-ready.
+Prisma schema: [`backend/prisma/schema.prisma`](../backend/prisma/schema.prisma). It uses PostgreSQL (local via docker-compose, production via Render Postgres).
 
 ```mermaid
 erDiagram
@@ -72,5 +72,5 @@ Append-only. A re-bid inserts a new row, and ranking uses each supplier's latest
 ### `ActivityLog`
 Append-only audit trail of RFQ creation, bids, and extensions. `message` is human-readable, e.g. *"Close time extended 17:55 → 18:00. Reason: New L1 (lowest bidder): Maersk Line within last 10 min; extended by 5 min"*. `metadata` holds structured JSON (bid id, from/to times, capped flag). Index: `(rfqId, createdAt)`.
 
-## Postgres notes
-To use Postgres, switch the `provider` and regenerate the migrations. Optional improvements for Postgres: native enums for `triggerType`/`type`, and `jsonb` for `metadata`.
+## Notes
+Optional improvements: native enums for `triggerType`/`type`, and `jsonb` for `metadata`. Both are stored as strings today to keep the schema simple.

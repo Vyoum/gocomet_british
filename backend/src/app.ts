@@ -13,7 +13,9 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 
 export function createApp() {
   const app = express();
-  app.use(cors());
+  // CORS_ORIGIN: comma-separated allowed origins (e.g. the Vercel URL). Unset = allow all.
+  const origins = (process.env.CORS_ORIGIN ?? '').split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
+  app.use(cors(origins.length ? { origin: origins } : undefined));
   app.use(express.json());
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, time: new Date() }));

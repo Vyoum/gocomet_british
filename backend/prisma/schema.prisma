@@ -1,11 +1,10 @@
-// SQLite by default. To use Postgres: set provider = "postgresql" and
-// DATABASE_URL="postgresql://user:pass@localhost:5432/rfq", then run `npx prisma migrate dev`.
+// PostgreSQL (local: docker-compose.yml at repo root; production: Render Postgres).
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -58,7 +57,7 @@ model ActivityLog {
   rfqId     String
   type      String // RFQ_CREATED | BID_PLACED | EXTENDED
   message   String
-  metadata  String? // JSON string (portable across SQLite/Postgres)
+  metadata  String? // JSON string
   createdAt DateTime @default(now())
   rfq       Rfq      @relation(fields: [rfqId], references: [id], onDelete: Cascade)
 

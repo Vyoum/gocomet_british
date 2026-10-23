@@ -14,7 +14,7 @@ flowchart LR
     M[Per-RFQ KeyedMutex]
     B[Event bus<br/>EventEmitter]
   end
-  DB[(SQLite / Postgres<br/>via Prisma)]
+  DB[(PostgreSQL<br/>via Prisma)]
   UI -- REST JSON --> R --> S
   S --> M
   S --> E
@@ -68,12 +68,12 @@ sequenceDiagram
 | Ties go to the earlier bid | Deterministic, and rewards whoever bid first. |
 | Status is computed from times, not stored | No scheduler is needed and there is no stale state. "Force Closed" means `currentClose` reached `forcedClose`. |
 | SSE rather than WebSockets | Updates only flow one way (server to client). SSE is simpler and works over plain HTTP. Polling is the fallback. |
-| Enums stored as strings, metadata as JSON text | Portable between SQLite and Postgres, so the database can be switched by changing only the provider. |
+| Enums stored as strings, metadata as JSON text | Keeps the schema simple and portable; native enums/jsonb are an easy later upgrade. |
 
 ## Concurrency
 Two bids that land in the same millisecond must not both read the old close time and the old ranking. If they did, one extension could be lost, or the trigger could be computed against a stale ranking. Two measures prevent this:
 1. **An in-process keyed mutex per RFQ** (`KeyedMutex`). Bids on the same RFQ run strictly one after another, while bids on different RFQs still run in parallel.
-2. **A single Prisma interactive transaction** for read → rank → insert → extend. A failure partway through rolls everything back. SQLite also serializes writers.
+2. **A single Prisma interactive transaction** for read → rank → insert → extend. A failure partway through rolls everything back.
 
 **Scaling to multiple API instances**: replace the mutex with a DB row lock (`SELECT … FROM rfq WHERE id=$1 FOR UPDATE` inside the transaction on Postgres) or a Redis lock. Replace the EventEmitter with Redis pub/sub so SSE fans out across instances.
 

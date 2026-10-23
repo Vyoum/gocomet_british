@@ -1,4 +1,5 @@
-const BASE = import.meta.env.VITE_API_URL ?? '/api';
+/** Backend origin (VITE_API_URL, e.g. the Render URL); '' = same origin (Vite dev proxy). */
+const BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '') + '/api';
 export type Status = 'UPCOMING' | 'ACTIVE' | 'CLOSED' | 'FORCE_CLOSED';
 export type TriggerType = 'BID_RECEIVED' | 'ANY_RANK_CHANGE' | 'L1_CHANGE';
 export interface Supplier { id: string; name: string }

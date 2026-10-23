@@ -2,18 +2,21 @@
 
 A simplified RFQ (Request for Quotation) platform where carriers bid openly on freight RFQs using **British Auction** rules: automatic time extensions near the close, configurable triggers, and a hard **forced close**.
 
-- `backend/`: Node.js, TypeScript, Express, Prisma (SQLite by default, Postgres-ready), Zod validation, SSE for live updates, Vitest unit tests
+- `backend/`: Node.js, TypeScript, Express, Prisma + PostgreSQL, Zod validation, SSE for live updates, Vitest unit tests
 - `frontend/`: React, Vite, TypeScript, Tailwind
 - `docs/`: [HLD](docs/HLD.md) and [DB schema](docs/SCHEMA.md)
 
-## Quick start (zero setup, SQLite)
+## Local setup
 
-Requires Node 18+.
+Requires Node 18+ and PostgreSQL. The easiest way to get Postgres is Docker.
 
 ```bash
+# 0. Postgres (from repo root): postgres:postgres@localhost:5432/rfq
+docker compose up -d
+
 # 1. Backend
 cd backend
-cp .env.example .env
+cp .env.example .env   # DATABASE_URL points at the docker-compose Postgres
 npm install
 npm run setup          # prisma migrate deploy + generate + seed demo data
 npm run dev            # http://localhost:4000
@@ -24,16 +27,35 @@ npm install
 npm run dev            # http://localhost:5173  (proxies /api -> :4000)
 ```
 
-Tests: `cd backend && npm test`
+Tests: `cd backend && npm test`. The unit tests don't need a database.
 
-Re-seed at any time with `npm run db:seed`. The seed creates RFQs relative to *now*, so there are always auctions that are active, already in their trigger window, upcoming, and closed.
+Re-seed at any time with `npm run db:seed`. **This wipes all data** and creates RFQs relative to *now*, so there are always auctions that are active, already in their trigger window, upcoming, and closed.
 
-### Switching to PostgreSQL
-1. In `backend/prisma/schema.prisma`, set `provider = "postgresql"`.
-2. In `.env`, set `DATABASE_URL="postgresql://user:pass@localhost:5432/rfq"`.
-3. Delete `backend/prisma/migrations` (it's SQLite-specific), then run `npx prisma migrate dev --name init && npm run db:seed`.
+If you already run Postgres without Docker, create a database and point `DATABASE_URL` in `backend/.env` at it.
 
-The schema avoids anything that only works in SQLite. Enums are stored as strings and metadata as JSON text, so no other changes are needed.
+## Deployment (Render + Vercel)
+
+**1. Backend + database on Render**
+1. Push this repo to GitHub.
+2. In Render, go to **New → Blueprint**, select the repo, and apply. `render.yaml` creates:
+   - `gocomet-british-db`: a free Postgres database.
+   - `gocomet-british-api`: a Node web service with `rootDir: backend`.
+     - Build: `npm ci && npx prisma generate && npm run build`.
+     - Start: `npm start`, which runs `prisma migrate deploy && node dist/index.js`.
+     - Health check: `/api/health`. `DATABASE_URL` is wired to the database automatically.
+3. Leave `CORS_ORIGIN` empty for now. Once deployed, note the URL, e.g. `https://gocomet-british-api.onrender.com`, and check that `/api/health` returns `{"ok":true}`.
+4. (Optional) To load demo data, open **Shell** on the web service and run `npm run db:seed`. This wipes existing data.
+
+**2. Frontend on Vercel**
+1. In Vercel, go to **Add New → Project** and import the repo.
+2. Set **Root Directory** to `frontend`. Vercel auto-detects the Vite preset: build `npm run build`, output `dist`.
+3. Add the environment variable `VITE_API_URL` = your Render URL, e.g. `https://gocomet-british-api.onrender.com`, with no trailing slash and no `/api`.
+4. Deploy. `frontend/vercel.json` rewrites every path to `index.html`, so client-side routes like `/rfq/:id` work when the page is reloaded.
+
+**3. Lock down CORS**
+- On Render, set `CORS_ORIGIN` on `gocomet-british-api` to the Vercel URL, e.g. `https://gocomet-british.vercel.app`. Comma-separate multiple origins. Saving triggers a redeploy.
+
+Note: free Render services sleep when idle, so the first request after a while can take about 30–60 s.
 
 ## Using the app
 1. **Listing** (`/`): every auction with its name/ID, current lowest bid, current close time (and how many extensions), a live countdown, forced close, and status (Upcoming / Active / Closed / Force Closed).

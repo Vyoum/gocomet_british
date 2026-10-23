@@ -1,6 +1,6 @@
 # Database Schema
 
-SQLAlchemy models: [`backend/app/models.py`](../backend/app/models.py). Migration: [`backend/alembic/versions/0001_initial.py`](../backend/alembic/versions/0001_initial.py). It uses PostgreSQL (local via docker-compose, production via Render Postgres). Table and column names are the same as the earlier Prisma schema (quoted camelCase), and all timestamps are `timestamptz`. IDs are UUID strings stored as `text`.
+SQLAlchemy models: [`backend/app/models.py`](../backend/app/models.py). Migrations: [`0001_initial.py`](../backend/alembic/versions/0001_initial.py) (tables, CHECKs, indexes) and [`0002_idempotency_capped_close.py`](../backend/alembic/versions/0002_idempotency_capped_close.py) (idempotency columns, `closedStatus`/`closedAt`, new activity types). It uses PostgreSQL (local via docker-compose, production via Render Postgres). Table and column names are the same as the earlier Prisma schema (quoted camelCase), and all timestamps are `timestamptz`. IDs are UUID strings stored as `text`.
 
 ```mermaid
 erDiagram
@@ -8,12 +8,12 @@ erDiagram
   RFQ ||--o{ BID : receives
   RFQ ||--o{ ACTIVITY_LOG : records
   SUPPLIER {
-    uuid id PK
+    string id PK
     string name UK
     datetime createdAt
   }
   RFQ {
-    uuid id PK
+    string id PK
     string referenceId UK
     string name
     datetime bidStartTime
@@ -25,23 +25,28 @@ erDiagram
     int extensionMinutes "Y"
     string triggerType "BID_RECEIVED|ANY_RANK_CHANGE|L1_CHANGE"
     int extensionCount
+    string closedStatus "nullable: CLOSED|FORCE_CLOSED (0002)"
+    datetime closedAt "nullable (0002)"
     datetime createdAt
   }
   BID {
-    uuid id PK
-    uuid rfqId FK
-    uuid supplierId FK
+    string id PK
+    string rfqId FK
+    string supplierId FK
     int freightCharges "minor units"
     int originCharges "minor units"
     int destinationCharges "minor units"
     int totalPrice "minor units, sum, used for ranking"
     int transitTimeDays
     datetime quoteValidUntil
+    string idempotencyKey "nullable, UK with rfqId (0002)"
+    string idempotencyHash "SHA-256 of payload (0002)"
+    string idempotencyResponse "original 201 JSON (0002)"
     datetime createdAt
   }
   ACTIVITY_LOG {
-    uuid id PK
-    uuid rfqId FK
+    string id PK
+    string rfqId FK
     string type "RFQ_CREATED|BID_PLACED|EXTENDED|EXTENSION_CAPPED|AUCTION_CLOSED|AUCTION_FORCE_CLOSED"
     string message "human-readable reason"
     string metadata "JSON"
@@ -51,8 +56,10 @@ erDiagram
 
 ## Tables
 
+All IDs are UUID strings in `text` columns; all timestamps are `timestamptz`.
+
 ### `Supplier`
-Carriers who bid. `name` is unique. There is no auth, so the UI picks a supplier from a dropdown.
+Carriers who bid. `name` is unique. There is no auth: in open-demo mode the UI picks a supplier from a dropdown, and with the demo role switcher the supplier is matched by name from `X-Supplier`. `POST /api/suppliers` get-or-creates one by name.
 
 ### `Rfq`
 | Column | Notes |

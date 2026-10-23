@@ -13,6 +13,10 @@
 - Backend: https://gocomet-british-fastapi.onrender.com
 - Health: https://gocomet-british-fastapi.onrender.com/api/health
 
+![Architecture](docs/architecture.svg)
+
+Docs: [Design overview](docs/DESIGN.md) · [High-level design](docs/HLD.md) · [Database schema](docs/SCHEMA.md)
+
 > The backend runs on Render's free tier and sleeps when idle. The first request can take **about 1 minute** to wake it. Open the Health link first and wait for `{"ok":true,...}`.
 
 ## 60-second walkthrough for reviewers
@@ -31,6 +35,17 @@ The seed creates five carriers: **Maersk Line, BlueDart Logistics, DHL Global Fo
 
 The *Open demo (no role)* option, which is the default, sends no role headers. It keeps the original behaviour: anyone can create RFQs and bid as any carrier from a dropdown.
 
+## Screenshots
+
+Captured with Playwright against the live deployment (desktop 1280 px wide, mobile 390 px).
+
+| | |
+|---|---|
+| **Listing** with L1/L2/L3 leaders and extension count<br>![Listing](docs/screenshots/01-listing.png) | **Create RFQ** (buyer)<br>![Create RFQ](docs/screenshots/02-create-rfq.png) |
+| **Auction details** with ranking and config<br>![Details](docs/screenshots/03-auction-detail-ranking.png) | **Bid form as a supplier** (own rank banner, carrier fixed)<br>![Bid form](docs/screenshots/04-bid-form-supplier.png) |
+| **Activity log**: `EXTENDED` and `EXTENSION_CAPPED`<br>![Activity log](docs/screenshots/05-activity-log-extension.png) | **Role switcher**: supplier view with "You are L*n*" chips<br>![Role switcher](docs/screenshots/06-role-switcher-supplier.png) |
+| **Mobile** (390 px)<br>![Mobile](docs/screenshots/07-mobile-detail.png) | **API docs** (`/docs`)<br>![API docs](docs/screenshots/08-api-docs.png) |
+
 ## Requirement coverage
 
 | Requirement (assignment spec) | Where it's implemented |
@@ -47,13 +62,13 @@ The *Open demo (no role)* option, which is the default, sends no role headers. I
 | §8 Activity log: bids, extensions, reason for each extension | `ActivityLog` table, `service.place_bid`, details page activity panel |
 | §2 Clear visibility of progress | live countdowns using server clock offset, SSE `/api/events`, extension counts |
 | Buyer vs supplier participants (§1) | Demo role switch: `frontend/src/role.ts`, `components/RoleSwitcher.tsx`, `get_viewer` in `backend/app/main.py` |
-| §9 HLD with architecture diagram | [docs/HLD.md](docs/HLD.md) |
+| §9 HLD with architecture diagram | [docs/DESIGN.md](docs/DESIGN.md), [docs/HLD.md](docs/HLD.md), [docs/architecture.svg](docs/architecture.svg) |
 | §9 DB schema design | [docs/SCHEMA.md](docs/SCHEMA.md), `backend/alembic/versions/` |
 | §9 Backend / frontend code | `backend/`, `frontend/` |
 
 ## Architecture
 
-Full design: [docs/HLD.md](docs/HLD.md). Schema: [docs/SCHEMA.md](docs/SCHEMA.md).
+Design overview: [docs/DESIGN.md](docs/DESIGN.md). Full design: [docs/HLD.md](docs/HLD.md). Schema: [docs/SCHEMA.md](docs/SCHEMA.md). Diagram: [docs/architecture.svg](docs/architecture.svg) ([PNG](docs/architecture.png)).
 
 ```mermaid
 flowchart LR
@@ -234,7 +249,8 @@ frontend/src/
   role.ts          Demo role state (localStorage) + header builder
   components/      RoleSwitcher.tsx, ui.tsx (badges, countdown, formatting)
   pages/           ListPage, CreatePage, DetailsPage
-docs/              HLD.md (architecture, sequence, concurrency), SCHEMA.md
+docs/              DESIGN.md, HLD.md (architecture, sequence, concurrency), SCHEMA.md,
+                   architecture.svg/.png, screenshots/
 docker-compose.yml, render.yaml, .github/workflows/ci.yml
 ```
 

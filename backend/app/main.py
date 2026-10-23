@@ -1,9 +1,10 @@
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -12,10 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import service
-from .config import cors_origins
+from .config import cors_origins, redis_url
 from .db import SessionLocal
 from .errors import HttpError, issues_from_pydantic
-from .events import bus
+from .events import bus, redis_relay
 from .schemas import BidIn, RfqIn
 from .serialize import iso
 
@@ -29,10 +30,20 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="RFQ British Auction API")
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        # Only when REDIS_URL / CELERY_BROKER_URL is set: relay events published by the Celery worker to SSE clients.
+        task = asyncio.create_task(redis_relay()) if redis_url() else None
+        try:
+            yield
+        finally:
+            if task:
+                task.cancel()
+
+    app = FastAPI(title="RFQ British Auction API", lifespan=lifespan)
     # CORS_ORIGIN: comma-separated allowed origins (e.g. the Vercel URL). Unset = allow all.
     origins = cors_origins()
-    app.add_middleware(CORSMiddleware, allow_origins=origins or ["*"], allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(CORSMiddleware, allow_origins=origins or ["*"], allow_methods=["*"], allow_headers=["*"], expose_headers=["Idempotent-Replayed"])
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError):
@@ -90,8 +101,18 @@ def create_app() -> FastAPI:
         return await service.get_rfq_details(s, rfq_id)
 
     @app.post("/api/rfqs/{rfq_id}/bids", status_code=201)
-    async def place_bid(rfq_id: str, body: BidIn, s: AsyncSession = Depends(get_session)):
-        return await service.place_bid(s, rfq_id, body)
+    async def place_bid(
+        rfq_id: str,
+        body: BidIn,
+        response: Response,
+        s: AsyncSession = Depends(get_session),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
+        # A replay of an earlier Idempotency-Key returns the original 201 body unchanged, flagged by a header.
+        result = await service.place_bid(s, rfq_id, body, idempotency_key=idempotency_key)
+        if idempotency_key is not None:
+            response.headers["Idempotent-Replayed"] = "true" if result.replayed else "false"
+        return dict(result)
 
     # Server-Sent Events: emits {rfqId} whenever any RFQ changes; clients refetch. Comment pings keep proxies happy.
     @app.get("/api/events")

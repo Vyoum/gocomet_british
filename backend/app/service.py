@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Callable
@@ -25,6 +26,10 @@ def _status(r: Rfq, now: datetime) -> str:
 
 def _fmt(d: datetime) -> str:
     return iso(d).replace("T", " ")[:19] + "Z"
+
+
+def _mins(m: float) -> str:
+    return str(int(m)) if float(m).is_integer() else f"{m:.2f}".rstrip("0")
 
 
 async def list_suppliers(s: AsyncSession) -> list[dict]:
@@ -67,16 +72,57 @@ async def create_rfq(s: AsyncSession, data: RfqIn) -> dict:
     return rfq_out(rfq)
 
 
-async def place_bid(s: AsyncSession, rfq_id: str, data: BidIn, now: Callable[[], datetime] = utcnow) -> dict:
+MAX_IDEMPOTENCY_KEY_LEN = 255
+
+
+class BidResult(dict):
+    """The bid response body; `replayed` is True when it was served from an earlier Idempotency-Key."""
+
+    def __init__(self, body: dict, replayed: bool = False):
+        super().__init__(body)
+        self.replayed = replayed
+
+
+def bid_fingerprint(data: BidIn) -> str:
+    """Stable hash of the (normalized) bid payload, used to detect Idempotency-Key reuse with a different body."""
+    payload = json.dumps(data.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def validate_idempotency_key(key: str | None) -> str | None:
+    if key is None:
+        return None
+    key = key.strip()
+    if not key or len(key) > MAX_IDEMPOTENCY_KEY_LEN or not key.isprintable():
+        raise HttpError(400, f"Idempotency-Key must be 1-{MAX_IDEMPOTENCY_KEY_LEN} printable characters")
+    return key
+
+
+async def place_bid(
+    s: AsyncSession, rfq_id: str, data: BidIn, now: Callable[[], datetime] = utcnow, idempotency_key: str | None = None
+) -> dict:
     """
     Race safety: the whole read-rank-extend-write sequence runs in ONE transaction that first takes a
     row lock on the RFQ (SELECT ... FOR UPDATE). Concurrent bids on the same RFQ queue on that lock, so
     each one sees the previous bid and the already-extended close time. `now` is read after the lock.
+
+    Idempotency: with an Idempotency-Key, the lookup of an earlier bid with that key happens AFTER the RFQ
+    lock, so concurrent duplicates queue and the later one sees the committed original and replays its stored
+    response (no new bid, extension, log entry or SSE event). The (rfqId, idempotencyKey) unique constraint
+    is a backstop. A replay is returned even if the auction has since closed.
     """
+    key = validate_idempotency_key(idempotency_key)
+    fingerprint = bid_fingerprint(data) if key else None
     async with s.begin():
         rfq = await s.scalar(select(Rfq).where(Rfq.id == rfq_id).with_for_update())
         if rfq is None:
             raise HttpError(404, "RFQ not found")
+        if key:
+            prior = await s.scalar(select(Bid).where(Bid.rfq_id == rfq_id, Bid.idempotency_key == key))
+            if prior is not None:
+                if prior.idempotency_hash != fingerprint:
+                    raise HttpError(422, "Idempotency-Key was already used for a different bid payload on this RFQ")
+                return BidResult(json.loads(prior.idempotency_response), replayed=True)
         supplier = await s.get(Supplier, data.supplierId)
         if supplier is None:
             raise HttpError(400, "Unknown supplier")
@@ -109,6 +155,8 @@ async def place_bid(s: AsyncSession, rfq_id: str, data: BidIn, now: Callable[[],
             transit_time_days=data.transitTimeDays,
             quote_valid_until=data.quoteValidUntil,
             created_at=at,
+            idempotency_key=key,
+            idempotency_hash=fingerprint,
         )
         s.add(bid)
         await s.flush()
@@ -151,6 +199,30 @@ async def place_bid(s: AsyncSession, rfq_id: str, data: BidIn, now: Callable[[],
                     created_at=at + timedelta(milliseconds=1),
                 )
             )
+        if d.triggered and d.granted_minutes < rfq.extension_minutes:
+            full = not d.extend
+            s.add(
+                ActivityLog(
+                    rfq_id=rfq_id,
+                    type="EXTENSION_CAPPED",
+                    message=(
+                        f"Extension {'blocked' if full else 'capped'} by forced close time {_fmt(rfq.forced_close_time)}: "
+                        f"requested +{rfq.extension_minutes} min, granted +{_mins(d.granted_minutes)} min. "
+                        f"Trigger: {d.reason.split(';')[0]}"
+                    ),
+                    metadata_=json.dumps(
+                        {
+                            "requestedMinutes": rfq.extension_minutes,
+                            "grantedMinutes": d.granted_minutes,
+                            "fullyCapped": full,
+                            "from": iso(old_close),
+                            "to": iso(d.new_close_time),
+                            "forcedCloseTime": iso(rfq.forced_close_time),
+                        }
+                    ),
+                    created_at=at + timedelta(milliseconds=2),
+                )
+            )
         result = {
             "bid": bid_out(bid),
             "rank": rank,
@@ -161,8 +233,10 @@ async def place_bid(s: AsyncSession, rfq_id: str, data: BidIn, now: Callable[[],
                 "reason": d.reason,
             },
         }
+        if key:
+            bid.idempotency_response = json.dumps(result)
     bus.publish(rfq_id)
-    return result
+    return BidResult(result)
 
 
 async def list_rfqs(s: AsyncSession, now: datetime | None = None) -> dict:

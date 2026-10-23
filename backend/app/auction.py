@@ -70,6 +70,10 @@ class ExtensionDecision:
     new_close_time: datetime
     capped_at_forced_close: bool
     reason: str = field(default="")
+    # True when the configured trigger condition was met (whether or not time could actually be added)
+    triggered: bool = False
+    # Minutes actually added (may be < extension_minutes when capped, 0 when already at forced close)
+    granted_minutes: float = 0.0
 
 
 def evaluate_extension(i: ExtensionInput) -> ExtensionDecision:
@@ -80,9 +84,6 @@ def evaluate_extension(i: ExtensionInput) -> ExtensionDecision:
 
     if not is_in_trigger_window(i.current_close_time, i.trigger_window_minutes, i.bid_time):
         return no("Bid outside trigger window")
-    if i.current_close_time >= i.forced_close_time:
-        return no("Already at forced close time")
-
     who = i.supplier_name or "a supplier"
     x = i.trigger_window_minutes
     why: str | None = None
@@ -98,12 +99,16 @@ def evaluate_extension(i: ExtensionInput) -> ExtensionDecision:
             why = f"New L1 (lowest bidder): {who} within last {x} min"
     if not why:
         return no(f"Trigger {i.trigger_type} not met")
+    if i.current_close_time >= i.forced_close_time:
+        # Trigger fired but there is no room left: fully capped (no extension).
+        return ExtensionDecision(False, i.current_close_time, True, f"{why}; not extended: already at forced close time", True, 0.0)
 
     proposed = i.current_close_time + timedelta(minutes=i.extension_minutes)
     capped = proposed >= i.forced_close_time
     new_close = min(proposed, i.forced_close_time)
     suffix = " (capped at forced close time)" if capped else ""
-    return ExtensionDecision(True, new_close, capped, f"{why}; extended by {i.extension_minutes} min{suffix}")
+    granted = (new_close - i.current_close_time).total_seconds() / 60
+    return ExtensionDecision(True, new_close, capped, f"{why}; extended by {i.extension_minutes} min{suffix}", True, granted)
 
 
 def validate_rfq_times(bid_start: datetime, bid_close: datetime, forced_close: datetime, x: int, y: int) -> list[str]:

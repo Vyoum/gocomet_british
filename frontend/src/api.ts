@@ -12,6 +12,7 @@ export interface Bid {
   id: string; supplierId: string; supplierName: string; freightCharges: number; originCharges: number; destinationCharges: number;
   totalPrice: number; transitTimeDays: number; quoteValidUntil: string; createdAt: string; rank?: number; label?: string;
 }
+export interface BidResult { rank: number; extension: { extend: boolean; cappedAtForcedClose: boolean; reason: string } }
 export interface Activity { id: string; type: string; message: string; createdAt: string }
 export interface RfqDetails extends Omit<RfqSummary, 'lowestBid' | 'bidCount' | 'supplierCount'> {
   serverTime: string; rankedBids: Bid[]; allBids: Bid[]; activity: Activity[];
@@ -22,10 +23,12 @@ let clockOffset = 0;
 export const serverNow = () => Date.now() + clockOffset;
 const syncClock = (serverTime?: string) => { if (serverTime) clockOffset = new Date(serverTime).getTime() - Date.now(); };
 
+export class HttpError extends Error { constructor(message: string, public status: number) { super(message); } }
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(BASE + path, { headers: { 'Content-Type': 'application/json' }, ...init });
+  const r = await fetch(BASE + path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers as Record<string, string> | undefined) } });
   const j = await r.json();
-  if (!r.ok) throw new Error(j.details && Array.isArray(j.details) && j.details[0]?.message ? `${j.error}: ${j.details.map((d: any) => `${d.path?.join('.')} ${d.message}`).join(', ')}` : j.error);
+  if (!r.ok) throw new HttpError(j.details && Array.isArray(j.details) && j.details[0]?.message ? `${j.error}: ${j.details.map((d: any) => `${d.path?.join('.')} ${d.message}`).join(', ')}` : j.error, r.status);
   return j;
 }
 export const api = {
@@ -33,7 +36,19 @@ export const api = {
   rfqs: () => req<{ serverTime: string; rfqs: RfqSummary[] }>('/rfqs').then((r) => { syncClock(r.serverTime); return r.rfqs; }),
   rfq: (id: string) => req<RfqDetails>(`/rfqs/${id}`).then((r) => { syncClock(r.serverTime); return r; }),
   createRfq: (b: unknown) => req<{ id: string }>('/rfqs', { method: 'POST', body: JSON.stringify(b) }),
-  placeBid: (id: string, b: unknown) => req<{ rank: number; extension: { extend: boolean; reason: string } }>(`/rfqs/${id}/bids`, { method: 'POST', body: JSON.stringify(b) }),
+  /** Same Idempotency-Key on every retry: the server replays the original result instead of creating a second bid. */
+  placeBid: async (id: string, b: unknown, idempotencyKey: string, retries = 2) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await req<BidResult>(`/rfqs/${id}/bids`, { method: 'POST', body: JSON.stringify(b), headers: { 'Idempotency-Key': idempotencyKey } });
+      } catch (e) {
+        // Retry only transport failures / 5xx (outcome unknown); 4xx are final answers.
+        const retryable = !(e instanceof HttpError) || e.status >= 500;
+        if (!retryable || attempt >= retries) throw e;
+        await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+      }
+    }
+  },
 };
 
 /** Subscribe to server-sent events; falls back to 5s polling if SSE fails. */

@@ -4,3 +4,5 @@ SQLAlchemy==2.0.36
 alembic==1.14.0
 pydantic==2.10.3
 psycopg[binary]==3.2.3
+celery[redis]==5.4.0
+redis==5.2.1

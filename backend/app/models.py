@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -33,6 +33,7 @@ class Rfq(Base):
         CheckConstraint('"currentCloseTime" >= "bidCloseTime"', name="rfq_current_ge_close"),
         CheckConstraint('"triggerWindowMinutes" > 0 AND "extensionMinutes" > 0', name="rfq_positive_xy"),
         CheckConstraint("\"triggerType\" IN ('BID_RECEIVED','ANY_RANK_CHANGE','L1_CHANGE')", name="rfq_trigger_type"),
+        CheckConstraint("\"closedStatus\" IS NULL OR \"closedStatus\" IN ('CLOSED','FORCE_CLOSED')", name="rfq_closed_status"),
         Index("Rfq_currentCloseTime_idx", "currentCloseTime"),
     )
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
@@ -47,6 +48,9 @@ class Rfq(Base):
     extension_minutes: Mapped[int] = mapped_column("extensionMinutes", Integer)
     trigger_type: Mapped[str] = mapped_column("triggerType", String)
     extension_count: Mapped[int] = mapped_column("extensionCount", Integer, default=0, server_default="0")
+    # Set by the optional Celery auto-close job (CLOSED / FORCE_CLOSED). Status on read is still computed from times.
+    closed_status: Mapped[str | None] = mapped_column("closedStatus", Text, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column("closedAt", TS, nullable=True)
     created_at: Mapped[datetime] = mapped_column("createdAt", TS, server_default=func.now())
 
     bids: Mapped[list["Bid"]] = relationship(back_populates="rfq", passive_deletes=True)
@@ -60,6 +64,7 @@ class Bid(Base):
         CheckConstraint('"totalPrice" > 0', name="bid_total_positive"),
         CheckConstraint('"transitTimeDays" > 0', name="bid_transit_positive"),
         Index("Bid_rfqId_supplierId_createdAt_idx", "rfqId", "supplierId", "createdAt"),
+        UniqueConstraint("rfqId", "idempotencyKey", name="Bid_rfqId_idempotencyKey_key"),
     )
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
     rfq_id: Mapped[str] = mapped_column("rfqId", Text, ForeignKey("Rfq.id", ondelete="CASCADE", onupdate="CASCADE"))
@@ -71,15 +76,22 @@ class Bid(Base):
     transit_time_days: Mapped[int] = mapped_column("transitTimeDays", Integer)
     quote_valid_until: Mapped[datetime] = mapped_column("quoteValidUntil", TS)
     created_at: Mapped[datetime] = mapped_column("createdAt", TS, server_default=func.now())
+    # Optional client Idempotency-Key (unique per RFQ), a hash of the request payload, and the original response JSON.
+    idempotency_key: Mapped[str | None] = mapped_column("idempotencyKey", Text, nullable=True)
+    idempotency_hash: Mapped[str | None] = mapped_column("idempotencyHash", Text, nullable=True)
+    idempotency_response: Mapped[str | None] = mapped_column("idempotencyResponse", Text, nullable=True)
 
     rfq: Mapped[Rfq] = relationship(back_populates="bids")
     supplier: Mapped[Supplier] = relationship()
 
 
+ACTIVITY_TYPES = ("RFQ_CREATED", "BID_PLACED", "EXTENDED", "EXTENSION_CAPPED", "AUCTION_CLOSED", "AUCTION_FORCE_CLOSED")
+
+
 class ActivityLog(Base):
     __tablename__ = "ActivityLog"
     __table_args__ = (
-        CheckConstraint("type IN ('RFQ_CREATED','BID_PLACED','EXTENDED')", name="activity_type"),
+        CheckConstraint(f"type IN ({', '.join(repr(t) for t in ACTIVITY_TYPES)})", name="activity_type"),
         Index("ActivityLog_rfqId_createdAt_idx", "rfqId", "createdAt"),
     )
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)

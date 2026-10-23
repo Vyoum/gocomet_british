@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.auction import (
     ExtensionInput,
@@ -114,3 +114,13 @@ def test_validate_rfq_times():
 
 def test_reason_texts():
     assert ext("BID_RECEIVED", T("17:55"), [], ["A"]).reason == "Bid received from a supplier within last 10 min; extended by 5 min"
+
+
+def test_trigger_at_forced_close_is_fully_capped():
+    d = ext("BID_RECEIVED", T("18:29"), [], ["A"], current=FORCED)
+    assert not d.extend and d.triggered and d.capped_at_forced_close and d.granted_minutes == 0
+
+
+def test_partial_cap_reports_granted_minutes():
+    d = ext("BID_RECEIVED", T("18:27"), [], ["A"], current=FORCED - timedelta(minutes=2))
+    assert d.extend and d.triggered and d.granted_minutes == 2

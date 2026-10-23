@@ -19,6 +19,11 @@ services:
       - key: PYTHON_VERSION
         value: "3.12.8"
 
+# Celery + Redis auto-close (backend/app/worker.py) is OPTIONAL and intentionally not provisioned here:
+# the free deployment has no Redis and the API works without it (status is computed on read).
+# To enable it, add a Key Value (Redis) instance + a worker running
+# `celery -A app.worker worker -B --loglevel=info` and set REDIS_URL on the API and worker (paid services).
+
 databases:
   - name: gocomet-british-db
     databaseName: rfq

@@ -2,7 +2,7 @@
 
 A simplified RFQ (Request for Quotation) platform where carriers bid openly on freight RFQs using **British Auction** rules: automatic time extensions near the close, configurable triggers, and a hard **forced close**.
 
-- `backend/`: Python 3.12, FastAPI, SQLAlchemy 2.0 (async) + Alembic, Pydantic v2, psycopg 3, PostgreSQL, SSE for live updates, pytest
+- `backend/`: Python 3.12, FastAPI, SQLAlchemy 2.0 (async) + Alembic, Pydantic v2, psycopg 3, PostgreSQL, SSE for live updates, pytest; optional Celery + Redis auto-close job
 - `frontend/`: React, Vite, TypeScript, Tailwind
 - `docs/`: [HLD](docs/HLD.md) and [DB schema](docs/SCHEMA.md)
 
@@ -29,7 +29,9 @@ npm install
 npm run dev            # http://localhost:5173  (proxies /api -> :4000)
 ```
 
-Alternatively, `docker compose up --build` runs Postgres and the API container together (API on :4000, with demo data seeded into an empty DB).
+Alternatively, `docker compose up --build` runs Postgres, Redis, the API container (API on :4000, with demo data seeded into an empty DB), and the optional Celery `worker` + `beat` that auto-close auctions.
+
+**Optional auto-close job (Celery + Redis)**: set `REDIS_URL` (or `CELERY_BROKER_URL`), then run `celery -A app.worker worker --loglevel=info` and `celery -A app.worker beat --loglevel=info` from `backend/`. Every `CLOSE_SWEEP_SECONDS` (default 15) it marks ended auctions Closed / Force Closed, writes an `AUCTION_CLOSED` / `AUCTION_FORCE_CLOSED` activity entry once, and pushes an SSE update through Redis pub/sub. Without Redis nothing changes: status is always computed from the timestamps on read.
 
 **Tests**: `cd backend && pytest`. They cover the pure engine, validation and the HTTP API, including a concurrent-bid test. The API tests need Postgres: they create and migrate a throwaway `rfq_test` database, set by `TEST_DATABASE_URL`, which defaults to `postgresql://postgres:postgres@localhost:5432/rfq_test`. CI (`.github/workflows/ci.yml`) runs them against a Postgres service and also builds the frontend.
 
@@ -61,6 +63,8 @@ You can re-seed at any time with `python -m app.seed`. **This wipes all data** a
 **3. Lock down CORS**
 - On Render, set `CORS_ORIGIN` on `gocomet-british-api` to the Vercel URL, e.g. `https://gocomet-british.vercel.app`. Comma-separate multiple origins. Saving triggers a redeploy.
 
+**Optional: Celery on Render.** `render.yaml` deliberately does **not** provision Redis or worker services, so the free deployment is unchanged (no extra cost) and the API works without them. To enable auto-close logging there, add a Render Key Value (Redis) instance plus a Background Worker (`celery -A app.worker worker -B --loglevel=info`, rootDir `backend`) and set `REDIS_URL` on both the API and the worker. These are paid services.
+
 Note: free Render services sleep when idle, so the first request after a while can take about 30–60 s.
 
 ## Using the app
@@ -79,10 +83,12 @@ Updates are pushed over **Server-Sent Events** (`/api/events`). If SSE fails, th
 | GET | `/api/rfqs` | `{ serverTime, rfqs }`: auctions with status, lowest bid, bid count |
 | POST | `/api/rfqs` | Create RFQ. Body: `referenceId, name, bidStartTime, bidCloseTime, forcedCloseTime, pickupDate, triggerWindowMinutes, extensionMinutes, triggerType` (`BID_RECEIVED`/`ANY_RANK_CHANGE`/`L1_CHANGE`) |
 | GET | `/api/rfqs/:id` | Details: ranked bids, all bids, activity log, status, server time |
-| POST | `/api/rfqs/:id/bids` | Place a bid. Body: `supplierId, freightCharges, originCharges, destinationCharges, transitTimeDays, quoteValidUntil`. Returns `{ bid, rank, extension }` |
+| POST | `/api/rfqs/:id/bids` | Place a bid. Body: `supplierId, freightCharges, originCharges, destinationCharges, transitTimeDays, quoteValidUntil`. Optional header `Idempotency-Key` (≤255 chars). Returns `{ bid, rank, extension }` |
 | GET | `/api/events` | SSE stream; emits `{rfqId}` whenever an RFQ changes |
 
-Errors come back as `{ error, details? }` with status 400 (validation, malformed JSON), 404, or 409 (bidding not open / duplicate ref ID). Numbers and dates are parsed strictly: empty strings and `null` are rejected, and numeric strings are accepted only if non-empty.
+Errors come back as `{ error, details? }` with status 400 (validation, malformed JSON), 404, 409 (bidding not open / duplicate ref ID), or 422 (`Idempotency-Key` reused with a different bid payload).
+
+**Idempotent bids**: repeating a bid POST with the same `Idempotency-Key` on the same RFQ returns the original 201 body (header `Idempotent-Replayed: true`) without creating a bid, extending, logging or emitting an SSE event, even if the auction has since closed. The UI sends a fresh `crypto.randomUUID()` per submission, reuses it when retrying a network/5xx failure of that same submission, and disables the submit button while the request is in flight. Numbers and dates are parsed strictly: empty strings and `null` are rejected, and numeric strings are accepted only if non-empty.
 
 Countdowns use the `serverTime` returned by the list and details endpoints, so a wrong client clock doesn't affect them. The client also refetches whenever the SSE connection (re)opens.
 
@@ -105,7 +111,7 @@ curl -X POST localhost:4000/api/rfqs -H 'content-type: application/json' -d '{
   - `BID_RECEIVED`: any accepted bid in the window extends the auction.
   - `ANY_RANK_CHANGE`: extends if the supplier order changes. A new supplier entering the ranking counts as a change.
   - `L1_CHANGE`: extends only if the L1 supplier changes. The first bid on an RFQ counts, because L1 goes from none to that supplier. L1 lowering its own price does **not** count.
-- **Extension**: `newClose = min(currentClose + Y, forcedClose)`. Once `currentClose == forcedClose`, no more extensions happen.
+- **Extension**: `newClose = min(currentClose + Y, forcedClose)`. Once `currentClose == forcedClose`, no more extensions happen. Whenever a trigger fires but the forced close limits the extension (partially or fully), an `EXTENSION_CAPPED` activity entry records the requested vs granted minutes.
 - **Status**: Upcoming (before start), Active, Closed (ended at a close time earlier than forced close), Force Closed (bidding ran until the forced close time).
 - **Concurrency**: each bid runs in one DB transaction that first takes `SELECT ... FOR UPDATE` on the RFQ row, so bids on the same RFQ are serialized even across multiple API instances. See [HLD](docs/HLD.md#concurrency).
 

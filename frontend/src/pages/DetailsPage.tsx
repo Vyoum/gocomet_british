@@ -1,6 +1,6 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, RfqDetails, Supplier, subscribe } from '../api';
+import { api, HttpError, RfqDetails, Supplier, subscribe } from '../api';
 import { Countdown, fmtDate, fmtMoney, StatusBadge, triggerLabel } from '../components/ui';
 
 export default function DetailsPage() {
@@ -65,7 +65,7 @@ export default function DetailsPage() {
           {rfq.activity.map((a) => (
             <li key={a.id} className="flex gap-3">
               <span className="w-44 shrink-0 text-xs text-slate-500">{fmtDate(a.createdAt)}</span>
-              <span className={`shrink-0 rounded px-1.5 text-xs font-semibold ${a.type === 'EXTENDED' ? 'bg-amber-100 text-amber-800' : a.type === 'BID_PLACED' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100'}`}>{a.type}</span>
+              <span title={a.type} className={`shrink-0 rounded px-1.5 text-xs font-semibold ${ACTIVITY_STYLE[a.type]?.cls ?? 'bg-slate-100'}`}>{ACTIVITY_STYLE[a.type]?.label ?? a.type}</span>
               <span>{a.message}</span>
             </li>
           ))}
@@ -75,6 +75,15 @@ export default function DetailsPage() {
   );
 }
 
+const ACTIVITY_STYLE: Record<string, { label: string; cls: string }> = {
+  RFQ_CREATED: { label: 'RFQ_CREATED', cls: 'bg-slate-100' },
+  BID_PLACED: { label: 'BID_PLACED', cls: 'bg-indigo-100 text-indigo-800' },
+  EXTENDED: { label: 'EXTENDED', cls: 'bg-amber-100 text-amber-800' },
+  EXTENSION_CAPPED: { label: 'EXTENSION CAPPED', cls: 'bg-orange-100 text-orange-800 ring-1 ring-orange-300' },
+  AUCTION_CLOSED: { label: 'CLOSED', cls: 'bg-slate-200 text-slate-800' },
+  AUCTION_FORCE_CLOSED: { label: 'FORCE CLOSED', cls: 'bg-red-100 text-red-800' },
+};
+
 const Info = ({ k, v, wide }: { k: string; v: string; wide?: boolean }) => (
   <div className={wide ? 'col-span-2' : ''}><dt className="text-xs text-slate-500">{k}</dt><dd className="font-medium">{v}</dd></div>
 );
@@ -83,6 +92,9 @@ function BidForm({ rfq, onDone }: { rfq: RfqDetails; onDone: () => void }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [f, setF] = useState({ supplierId: '', freightCharges: '', originCharges: '', destinationCharges: '', transitTimeDays: '7', quoteValidUntil: new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10) });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  // One Idempotency-Key per submission: reused if the same payload is re-submitted after an unknown outcome.
+  const attempt = useRef<{ key: string; payload: string } | null>(null);
   useEffect(() => { api.suppliers().then((s) => { setSuppliers(s); setF((x) => ({ ...x, supplierId: x.supplierId || s[0]?.id || '' })); }); }, []);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const total = (+f.freightCharges || 0) + (+f.originCharges || 0) + (+f.destinationCharges || 0);
@@ -90,12 +102,23 @@ function BidForm({ rfq, onDone }: { rfq: RfqDetails; onDone: () => void }) {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setMsg(null);
+    const body = { ...f, quoteValidUntil: new Date(f.quoteValidUntil).toISOString() };
+    const payload = JSON.stringify(body);
+    if (attempt.current?.payload !== payload) attempt.current = { key: crypto.randomUUID(), payload };
+    setBusy(true);
     try {
-      const r = await api.placeBid(rfq.id, { ...f, quoteValidUntil: new Date(f.quoteValidUntil).toISOString() });
-      setMsg({ ok: true, text: `Bid accepted — you are L${r.rank}.${r.extension.extend ? ' ' + r.extension.reason : ''}` });
+      const r = await api.placeBid(rfq.id, body, attempt.current.key);
+      attempt.current = null;
+      const ext = r.extension.extend || r.extension.cappedAtForcedClose ? ' ' + r.extension.reason : '';
+      setMsg({ ok: true, text: `Bid accepted — you are L${r.rank}.${ext}` });
       onDone();
-    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+    } catch (e) {
+      // Definitive rejections (4xx) mean the next submit is a new attempt; otherwise keep the key for a safe retry.
+      if (e instanceof HttpError && e.status < 500) attempt.current = null;
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally { setBusy(false); }
   }
   const open = rfq.status === 'ACTIVE';
   return (
@@ -115,7 +138,7 @@ function BidForm({ rfq, onDone }: { rfq: RfqDetails; onDone: () => void }) {
         <div><label className="label">Transit time (days)</label><input required type="number" min={1} className="input" value={f.transitTimeDays} onChange={set('transitTimeDays')} /></div>
         <div><label className="label">Quote valid until</label><input required type="date" className="input" value={f.quoteValidUntil} onChange={set('quoteValidUntil')} /></div>
       </div>
-      <button className="btn w-full" disabled={!open}>{open ? 'Submit bid' : `Bidding ${rfq.status === 'UPCOMING' ? 'not started' : 'closed'}`}</button>
+      <button className="btn w-full" disabled={!open || busy} aria-busy={busy}>{busy ? 'Submitting…' : open ? 'Submit bid' : `Bidding ${rfq.status === 'UPCOMING' ? 'not started' : 'closed'}`}</button>
       {msg && <p className={`text-sm ${msg.ok ? 'text-green-700' : 'text-red-600'}`}>{msg.text}</p>}
     </form>
   );

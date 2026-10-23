@@ -52,7 +52,7 @@ async def test_seed_and_list_shape(client):
     assert by_ref["RFQ-1002"]["lowestBid"] is None
     expected = {"id", "referenceId", "name", "bidStartTime", "bidCloseTime", "currentCloseTime", "forcedCloseTime",
                 "pickupDate", "triggerWindowMinutes", "extensionMinutes", "triggerType", "extensionCount", "createdAt",
-                "status", "lowestBid", "bidCount", "supplierCount"}
+                "status", "lowestBid", "bidCount", "supplierCount", "topRanks"}
     assert set(r) == expected
     starts = [x["bidStartTime"] for x in body["rfqs"]]
     assert starts == sorted(starts, reverse=True)
@@ -161,3 +161,39 @@ async def test_demo_seed_only_when_empty(client):
     rfqs = (await client.get("/api/rfqs")).json()["rfqs"]
     r = next(x for x in rfqs if x["referenceId"] == "RFQ-1001")
     assert datetime.fromisoformat(r["bidCloseTime"]) - now() > timedelta(days=6)
+
+
+async def _ranks(client, ref):
+    rfq = next(r for r in (await client.get("/api/rfqs")).json()["rfqs"] if r["referenceId"] == ref)
+    return rfq["topRanks"]
+
+
+async def test_top_ranks_empty_and_order(client):
+    sup = await suppliers(client)
+    rfq = await make_rfq(client, ref="TR-1")
+    assert await _ranks(client, "TR-1") == []
+    assert (await _ranks(client, "RFQ-1002")) == []
+    seeded = await _ranks(client, "RFQ-1001")
+    assert seeded[0]["rank"] == 1 and seeded[0]["total"] == 2200
+    for s_, f in zip(sup[:4], [3000, 1000, 2000, 4000]):
+        assert (await client.post(f"/api/rfqs/{rfq['id']}/bids", json=bid_body(s_["id"], f=f))).status_code == 201
+    tr = await _ranks(client, "TR-1")
+    assert [t["rank"] for t in tr] == [1, 2, 3]
+    assert [t["carrierName"] for t in tr] == [sup[1]["name"], sup[2]["name"], sup[0]["name"]]
+    assert [t["total"] for t in tr] == [1150, 2150, 3150]
+    assert set(tr[0]) == {"rank", "carrierName", "total"}
+
+
+async def test_top_ranks_tie_and_latest_bid(client):
+    sup = await suppliers(client)
+    rfq = await make_rfq(client, ref="TR-2")
+    url = f"/api/rfqs/{rfq['id']}/bids"
+    assert (await client.post(url, json=bid_body(sup[0]["id"], f=2000))).status_code == 201
+    assert (await client.post(url, json=bid_body(sup[1]["id"], f=2000))).status_code == 201  # tie -> earlier wins
+    tr = await _ranks(client, "TR-2")
+    assert [t["carrierName"] for t in tr] == [sup[0]["name"], sup[1]["name"]]
+    assert (await client.post(url, json=bid_body(sup[1]["id"], f=1500))).status_code == 201  # latest bid counts
+    tr = await _ranks(client, "TR-2")
+    assert [(t["carrierName"], t["total"]) for t in tr] == [(sup[1]["name"], 1650), (sup[0]["name"], 2150)]
+    details = (await client.get(f"/api/rfqs/{rfq['id']}")).json()["rankedBids"]
+    assert [b["supplierName"] for b in details][:3] == [t["carrierName"] for t in tr]

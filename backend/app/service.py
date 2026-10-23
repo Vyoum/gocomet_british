@@ -241,7 +241,7 @@ async def place_bid(
 
 async def list_rfqs(s: AsyncSession, now: datetime | None = None) -> dict:
     now = now or utcnow()
-    rfqs = (await s.scalars(select(Rfq).options(selectinload(Rfq.bids)).order_by(Rfq.bid_start_time.desc()))).all()
+    rfqs = (await s.scalars(select(Rfq).options(selectinload(Rfq.bids).selectinload(Bid.supplier)).order_by(Rfq.bid_start_time.desc()))).all()
     items = []
     for r in rfqs:
         ranked = rank_bids(r.bids)
@@ -252,6 +252,10 @@ async def list_rfqs(s: AsyncSession, now: datetime | None = None) -> dict:
                 "lowestBid": from_minor(ranked[0][1].total_price) if ranked else None,
                 "bidCount": len(r.bids),
                 "supplierCount": len(ranked),
+                "topRanks": [
+                    {"rank": rank, "carrierName": b.supplier.name, "total": from_minor(b.total_price)}
+                    for rank, b in ranked[:3]
+                ],
             }
         )
     return {"serverTime": iso(now), "rfqs": items}

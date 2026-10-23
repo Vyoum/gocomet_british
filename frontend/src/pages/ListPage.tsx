@@ -1,7 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, RfqSummary, subscribe } from '../api';
+import { api, RfqSummary, subscribe, TopRank } from '../api';
 import { Countdown, fmtDate, fmtMoney, StatusBadge } from '../components/ui';
+
+function Leaders({ ranks, chips }: { ranks?: TopRank[]; chips?: boolean }) {
+  if (!ranks?.length) return <div className="text-xs text-slate-400" data-testid="leaders">No bids yet</div>;
+  return (
+    <ul className={chips ? 'flex flex-wrap gap-1.5' : 'space-y-0.5'} data-testid="leaders">
+      {ranks.map((t) => (
+        <li key={t.rank} title={`L${t.rank} ${t.carrierName} ${fmtMoney(t.total)}`}
+          className={`flex min-w-0 max-w-full items-center gap-1.5 text-xs ${chips ? `rounded-full px-2 py-0.5 ${t.rank === 1 ? 'bg-emerald-50 ring-1 ring-emerald-200' : 'bg-slate-100'}` : ''}`}>
+          <span className={`shrink-0 font-semibold ${t.rank === 1 ? 'text-emerald-700' : 'text-slate-500'}`}>L{t.rank}</span>
+          <span className={`min-w-0 truncate ${chips ? 'max-w-[9rem]' : 'max-w-[10rem]'} ${t.rank === 1 ? 'text-emerald-800 font-medium' : 'text-slate-700'}`}>{t.carrierName}</span>
+          <span className={`shrink-0 tabular-nums ${t.rank === 1 ? 'text-emerald-700 font-semibold' : 'text-slate-600'}`}>{fmtMoney(t.total)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export default function ListPage() {
   const [rfqs, setRfqs] = useState<RfqSummary[]>([]);
@@ -31,6 +47,7 @@ export default function ListPage() {
                 <div><dt className="text-xs text-slate-500">Forced close</dt><dd>{fmtDate(r.forcedCloseTime)}</dd></div>
                 <div><dt className="text-xs text-slate-500">Bids</dt><dd>{r.bidCount}</dd></div>
               </dl>
+              <div className="mt-3"><div className="mb-1 text-xs text-slate-500">Leaders</div><Leaders ranks={r.topRanks} chips /></div>
             </Link>
           </li>
         ))}
@@ -45,7 +62,7 @@ export default function ListPage() {
           {rfqs.map((r) => (
             <tr key={r.id} className="hover:bg-slate-50">
               <td className="td"><Link className="font-medium text-indigo-700 hover:underline" to={`/rfq/${r.id}`}>{r.name}</Link><div className="text-xs text-slate-500">{r.referenceId}</div></td>
-              <td className="td font-semibold">{fmtMoney(r.lowestBid)}</td>
+              <td className="td"><div className="font-semibold">{fmtMoney(r.lowestBid)}</div><div className="mt-1"><Leaders ranks={r.topRanks} /></div></td>
               <td className="td">{fmtDate(r.currentCloseTime)}{r.extensionCount > 0 && <span className="ml-1 text-xs text-amber-700">(+{r.extensionCount} ext)</span>}</td>
               <td className="td"><Countdown to={r.currentCloseTime} from={r.bidStartTime} onZero={load} /></td>
               <td className="td">{fmtDate(r.forcedCloseTime)}</td>

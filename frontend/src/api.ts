@@ -7,14 +7,16 @@ export interface RfqSummary {
   id: string; referenceId: string; name: string; bidStartTime: string; bidCloseTime: string; currentCloseTime: string;
   forcedCloseTime: string; pickupDate: string; triggerWindowMinutes: number; extensionMinutes: number; triggerType: TriggerType;
   extensionCount: number; status: Status; lowestBid: number | null; bidCount: number; supplierCount: number;
+  topRanks: TopRank[];
 }
+export interface TopRank { rank: number; carrierName: string; total: number }
 export interface Bid {
   id: string; supplierId: string; supplierName: string; freightCharges: number; originCharges: number; destinationCharges: number;
   totalPrice: number; transitTimeDays: number; quoteValidUntil: string; createdAt: string; rank?: number; label?: string;
 }
 export interface BidResult { rank: number; extension: { extend: boolean; cappedAtForcedClose: boolean; reason: string } }
 export interface Activity { id: string; type: string; message: string; createdAt: string }
-export interface RfqDetails extends Omit<RfqSummary, 'lowestBid' | 'bidCount' | 'supplierCount'> {
+export interface RfqDetails extends Omit<RfqSummary, 'lowestBid' | 'bidCount' | 'supplierCount' | 'topRanks'> {
   serverTime: string; rankedBids: Bid[]; allBids: Bid[]; activity: Activity[];
 }
 

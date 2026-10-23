@@ -1,15 +1,19 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, HttpError, RfqDetails, Supplier, subscribe } from '../api';
+import { canBid, Role, sameName, useRole } from '../role';
 import { Countdown, fmtDate, fmtMoney, StatusBadge, fmtActivity, triggerLabel } from '../components/ui';
 
 export default function DetailsPage() {
   const { id = '' } = useParams();
   const [rfq, setRfq] = useState<RfqDetails | null>(null);
   const [err, setErr] = useState('');
-  const load = useCallback(() => api.rfq(id).then(setRfq).catch((e) => setErr(e.message)), [id]);
+  const role = useRole();
+  const load = useCallback(() => api.rfq(id).then(setRfq).catch((e) => setErr(e.message)), [id, role]);
   useEffect(() => { load(); return subscribe((rid) => (rid === id || rid === '*') && load()); }, [id, load]);
   if (!rfq) return <p className="text-slate-500">{err || 'Loading…'}</p>;
+  const isMe = (name: string) => role.kind === 'supplier' && sameName(name, role.name);
+  const myBid = role.kind === 'supplier' ? rfq.rankedBids.find((b) => isMe(b.supplierName)) : undefined;
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -35,12 +39,17 @@ export default function DetailsPage() {
           <Info k="Trigger" v={triggerLabel[rfq.triggerType]} wide />
         </dl>
       </div>
+      {role.kind === 'supplier' && (
+        <div className="rounded border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm text-indigo-900" data-testid="my-rank-banner">
+          {myBid ? <>You are <b>{myBid.label}</b> ({role.name}, {fmtMoney(myBid.totalPrice)})</> : <>{role.name} has not bid on this RFQ yet</>}
+        </div>
+      )}
       <div className="print-block grid gap-6 lg:grid-cols-3">
         <div className="card print-full min-w-0 p-0 lg:col-span-2">
           <h2 className="p-4 pb-2 font-semibold sm:p-5 sm:pb-2">Ranking (latest bid per supplier)</h2>
           <ul className="space-y-2 px-4 pb-4 md:hidden print-hide" data-testid="rank-cards">
             {rfq.rankedBids.map((b) => (
-              <li key={b.id} className={`rounded border p-3 text-sm ${b.rank === 1 ? 'border-green-300 bg-green-50' : 'border-slate-200'}`}>
+              <li key={b.id} className={`rounded border p-3 text-sm ${isMe(b.supplierName) ? 'border-indigo-400 bg-indigo-50 ring-2 ring-indigo-300' : b.rank === 1 ? 'border-green-300 bg-green-50' : 'border-slate-200'}`} data-me={isMe(b.supplierName) || undefined}>
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="min-w-0 break-words"><b className="mr-2">{b.label}</b>{b.supplierName}</span>
                   <span className="shrink-0 font-semibold">{fmtMoney(b.totalPrice)}</span>
@@ -62,8 +71,8 @@ export default function DetailsPage() {
             <thead className="bg-slate-50"><tr>{['Rank', 'Carrier', 'Freight', 'Origin', 'Destination', 'Total', 'Transit', 'Valid until', 'Bid at'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100">
               {rfq.rankedBids.map((b) => (
-                <tr key={b.id} className={`print-row ${b.rank === 1 ? 'bg-green-50' : ''}`}>
-                  <td className="td font-bold">{b.label}</td><td className="td print-wrap">{b.supplierName}</td>
+                <tr key={b.id} className={`print-row ${isMe(b.supplierName) ? 'bg-indigo-50 outline outline-2 -outline-offset-2 outline-indigo-300' : b.rank === 1 ? 'bg-green-50' : ''}`} data-me={isMe(b.supplierName) || undefined}>
+                  <td className="td font-bold">{b.label}</td><td className="td print-wrap">{b.supplierName}{isMe(b.supplierName) && <span className="ml-1 text-xs font-semibold text-indigo-700">(you)</span>}</td>
                   <td className="td">{fmtMoney(b.freightCharges)}</td><td className="td">{fmtMoney(b.originCharges)}</td><td className="td">{fmtMoney(b.destinationCharges)}</td>
                   <td className="td font-semibold">{fmtMoney(b.totalPrice)}</td><td className="td">{b.transitTimeDays} d</td>
                   <td className="td">{new Date(b.quoteValidUntil).toLocaleDateString()}</td><td className="td text-xs">{fmtDate(b.createdAt)}</td>
@@ -78,7 +87,8 @@ export default function DetailsPage() {
               <ul className="mt-2 space-y-1">{rfq.allBids.map((b) => <li key={b.id} className="print-wrap break-words">{fmtDate(b.createdAt)} — {b.supplierName}: {fmtMoney(b.totalPrice)}</li>)}</ul>
             </details>)}
         </div>
-        <BidForm rfq={rfq} onDone={load} />
+        {canBid(role) ? <BidForm rfq={rfq} onDone={load} role={role} />
+          : <div className="card no-print min-w-0 text-sm text-slate-600" data-testid="buyer-note"><h2 className="mb-1 font-semibold text-slate-900">Submit quote</h2>You are viewing as the <b>Buyer</b>. Buyers can't submit bids — switch to a supplier role in the header (demo, no auth).</div>}
       </div>
       <div className="card">
         <h2 className="mb-3 font-semibold">Activity log</h2>
@@ -109,14 +119,21 @@ const Info = ({ k, v, wide }: { k: string; v: string; wide?: boolean }) => (
   <div className={`min-w-0 break-words ${wide ? 'min-[380px]:col-span-2' : ''}`}><dt className="text-xs text-slate-500">{k}</dt><dd className="font-medium">{v}</dd></div>
 );
 
-function BidForm({ rfq, onDone }: { rfq: RfqDetails; onDone: () => void }) {
+function BidForm({ rfq, onDone, role }: { rfq: RfqDetails; onDone: () => void; role: Role }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [f, setF] = useState({ supplierId: '', freightCharges: '', originCharges: '', destinationCharges: '', transitTimeDays: '7', quoteValidUntil: new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10) });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   // One Idempotency-Key per submission: reused if the same payload is re-submitted after an unknown outcome.
   const attempt = useRef<{ key: string; payload: string } | null>(null);
-  useEffect(() => { api.suppliers().then((s) => { setSuppliers(s); setF((x) => ({ ...x, supplierId: x.supplierId || s[0]?.id || '' })); }); }, []);
+  const fixed = role.kind === 'supplier' ? role.name : null;
+  useEffect(() => {
+    api.suppliers().then((s) => {
+      setSuppliers(s);
+      const own = fixed ? s.find((x) => sameName(x.name, fixed))?.id ?? '' : '';
+      setF((x) => ({ ...x, supplierId: fixed ? own : x.supplierId || s[0]?.id || '' }));
+    });
+  }, [fixed]);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const total = (+f.freightCharges || 0) + (+f.originCharges || 0) + (+f.destinationCharges || 0);
   const mine = rfq.rankedBids.find((b) => b.supplierId === f.supplierId);
@@ -145,8 +162,9 @@ function BidForm({ rfq, onDone }: { rfq: RfqDetails; onDone: () => void }) {
   return (
     <form onSubmit={submit} className="card no-print min-w-0 space-y-3">
       <h2 className="font-semibold">Submit quote</h2>
-      <div><label className="label">Acting as carrier (demo — no auth)</label>
-        <select className="input" value={f.supplierId} onChange={set('supplierId')}>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+      <div><label className="label">{fixed ? 'Bidding as (demo role)' : 'Acting as carrier (demo — no auth)'}</label>
+        {fixed ? <div className="input bg-slate-50 font-medium" data-testid="fixed-carrier">{fixed}</div>
+          : <select className="input" value={f.supplierId} onChange={set('supplierId')}>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}
         {mine && <p className="mt-1 text-xs text-slate-500">Your current bid: {fmtMoney(mine.totalPrice)} ({mine.label}). Re-bids must be lower.</p>}
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-2 lg:grid-cols-1 xl:grid-cols-3">

@@ -5,11 +5,12 @@ import './index.css';
 import ListPage from './pages/ListPage';
 import CreatePage from './pages/CreatePage';
 import DetailsPage from './pages/DetailsPage';
+import RoleSwitcher from './components/RoleSwitcher';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <header className="border-b bg-white"><div className="mx-auto flex max-w-7xl items-center px-4"><Link to="/" className="inline-flex min-h-[48px] items-center font-bold text-indigo-700">RFQ · British Auction</Link></div></header>
+      <header className="border-b bg-white"><div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 px-4"><Link to="/" className="inline-flex min-h-[48px] shrink-0 items-center font-bold text-indigo-700">RFQ · British Auction</Link><RoleSwitcher /></div></header>
       <main className="mx-auto max-w-7xl p-3 sm:p-4">
         <Routes>
           <Route path="/" element={<ListPage />} />

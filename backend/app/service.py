@@ -99,7 +99,12 @@ def validate_idempotency_key(key: str | None) -> str | None:
 
 
 async def place_bid(
-    s: AsyncSession, rfq_id: str, data: BidIn, now: Callable[[], datetime] = utcnow, idempotency_key: str | None = None
+    s: AsyncSession,
+    rfq_id: str,
+    data: BidIn,
+    now: Callable[[], datetime] = utcnow,
+    idempotency_key: str | None = None,
+    acting_supplier: str | None = None,
 ) -> dict:
     """
     Race safety: the whole read-rank-extend-write sequence runs in ONE transaction that first takes a
@@ -117,6 +122,11 @@ async def place_bid(
         rfq = await s.scalar(select(Rfq).where(Rfq.id == rfq_id).with_for_update())
         if rfq is None:
             raise HttpError(404, "RFQ not found")
+        if acting_supplier is not None:
+            # Demo role rule (X-Role: supplier): a supplier may only bid as itself.
+            own = await s.get(Supplier, data.supplierId)
+            if own is None or own.name.casefold() != acting_supplier.casefold():
+                raise HttpError(403, "Suppliers can only bid as themselves")
         if key:
             prior = await s.scalar(select(Bid).where(Bid.rfq_id == rfq_id, Bid.idempotency_key == key))
             if prior is not None:
@@ -239,7 +249,21 @@ async def place_bid(
     return BidResult(result)
 
 
-async def list_rfqs(s: AsyncSession, now: datetime | None = None) -> dict:
+async def ensure_supplier(s: AsyncSession, name: str) -> dict:
+    """Get-or-create a carrier by name (case-insensitive match). Used by the demo role switcher."""
+    name = " ".join(name.split())
+    if not name or len(name) > 100:
+        raise HttpError(400, "Validation failed", [{"code": "custom", "path": ["name"], "message": "Name must be 1-100 characters"}])
+    async with s.begin():
+        found = await s.scalar(select(Supplier).where(func.lower(Supplier.name) == name.lower()))
+        if found is None:
+            found = Supplier(name=name)
+            s.add(found)
+            await s.flush()
+        return supplier_out(found)
+
+
+async def list_rfqs(s: AsyncSession, now: datetime | None = None, viewer: str | None = None) -> dict:
     now = now or utcnow()
     rfqs = (await s.scalars(select(Rfq).options(selectinload(Rfq.bids).selectinload(Bid.supplier)).order_by(Rfq.bid_start_time.desc()))).all()
     items = []
@@ -258,6 +282,9 @@ async def list_rfqs(s: AsyncSession, now: datetime | None = None) -> dict:
                 ],
             }
         )
+        if viewer is not None:
+            # Only with X-Role: supplier — the viewing supplier's own rank (null if it has not bid).
+            items[-1]["myRank"] = next((rank for rank, b in ranked if b.supplier.name.casefold() == viewer.casefold()), None)
     return {"serverTime": iso(now), "rfqs": items}
 
 

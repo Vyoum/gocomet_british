@@ -1,3 +1,5 @@
+import { roleHeaders } from './role';
+
 /** Backend origin (VITE_API_URL, e.g. the Render URL); '' = same origin (Vite dev proxy). */
 const BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '') + '/api';
 export type Status = 'UPCOMING' | 'ACTIVE' | 'CLOSED' | 'FORCE_CLOSED';
@@ -8,6 +10,8 @@ export interface RfqSummary {
   forcedCloseTime: string; pickupDate: string; triggerWindowMinutes: number; extensionMinutes: number; triggerType: TriggerType;
   extensionCount: number; status: Status; lowestBid: number | null; bidCount: number; supplierCount: number;
   topRanks: TopRank[];
+  /** Only present for X-Role: supplier — the viewing supplier's rank, null if not bid. */
+  myRank?: number | null;
 }
 export interface TopRank { rank: number; carrierName: string; total: number }
 export interface Bid {
@@ -28,13 +32,14 @@ const syncClock = (serverTime?: string) => { if (serverTime) clockOffset = new D
 export class HttpError extends Error { constructor(message: string, public status: number) { super(message); } }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(BASE + path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers as Record<string, string> | undefined) } });
+  const r = await fetch(BASE + path, { ...init, headers: { 'Content-Type': 'application/json', ...roleHeaders(), ...(init?.headers as Record<string, string> | undefined) } });
   const j = await r.json();
   if (!r.ok) throw new HttpError(j.details && Array.isArray(j.details) && j.details[0]?.message ? `${j.error}: ${j.details.map((d: any) => `${d.path?.join('.')} ${d.message}`).join(', ')}` : j.error, r.status);
   return j;
 }
 export const api = {
   suppliers: () => req<Supplier[]>('/suppliers'),
+  ensureSupplier: (name: string) => req<Supplier>('/suppliers', { method: 'POST', body: JSON.stringify({ name }) }),
   rfqs: () => req<{ serverTime: string; rfqs: RfqSummary[] }>('/rfqs').then((r) => { syncClock(r.serverTime); return r.rfqs; }),
   rfq: (id: string) => req<RfqDetails>(`/rfqs/${id}`).then((r) => { syncClock(r.serverTime); return r; }),
   createRfq: (b: unknown) => req<{ id: string }>('/rfqs', { method: 'POST', body: JSON.stringify(b) }),

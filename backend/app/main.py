@@ -24,6 +24,41 @@ log = logging.getLogger("rfq")
 PING_SECONDS = 20
 
 
+class Viewer:
+    """DEMO roles only — NOT authentication. Headers are trusted as sent by the client.
+    No X-Role header = legacy behaviour (everything allowed). Real auth would replace this
+    dependency with one that verifies a JWT and reads role/supplier from its claims."""
+
+    def __init__(self, role: str | None, supplier: str | None):
+        self.role, self.supplier = role, supplier
+
+
+def get_viewer(
+    x_role: str | None = Header(default=None, alias="X-Role"),
+    x_supplier: str | None = Header(default=None, alias="X-Supplier"),
+) -> Viewer:
+    role = (x_role or "").strip().lower() or None
+    if role not in (None, "buyer", "supplier"):
+        raise HttpError(400, "X-Role must be 'buyer' or 'supplier'")
+    supplier = (x_supplier or "").strip() or None
+    if role == "supplier" and supplier is None:
+        raise HttpError(400, "X-Supplier header is required when X-Role is 'supplier'")
+    return Viewer(role, supplier if role == "supplier" else None)
+
+
+def forbid_supplier(viewer: Viewer = Depends(get_viewer)) -> Viewer:
+    # Runs before body validation, so a supplier gets 403 even for an invalid payload.
+    if viewer.role == "supplier":
+        raise HttpError(403, "Suppliers cannot create RFQs")
+    return viewer
+
+
+def forbid_buyer(viewer: Viewer = Depends(get_viewer)) -> Viewer:
+    if viewer.role == "buyer":
+        raise HttpError(403, "Buyers cannot submit bids")
+    return viewer
+
+
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with SessionLocal() as s:
         yield s
@@ -88,12 +123,20 @@ def create_app() -> FastAPI:
     async def suppliers(s: AsyncSession = Depends(get_session)):
         return await service.list_suppliers(s)
 
+    @app.post("/api/suppliers")
+    async def ensure_supplier(body: dict, s: AsyncSession = Depends(get_session)):
+        # Demo helper: get-or-create a carrier by name (lets the role switcher add a new carrier).
+        name = body.get("name") if isinstance(body, dict) else None
+        if not isinstance(name, str):
+            raise HttpError(400, "Validation failed", [{"code": "invalid_type", "path": ["name"], "message": "Required"}])
+        return await service.ensure_supplier(s, name)
+
     @app.get("/api/rfqs")
-    async def rfqs(s: AsyncSession = Depends(get_session)):
-        return await service.list_rfqs(s)
+    async def rfqs(s: AsyncSession = Depends(get_session), viewer: Viewer = Depends(get_viewer)):
+        return await service.list_rfqs(s, viewer=viewer.supplier)
 
     @app.post("/api/rfqs", status_code=201)
-    async def create_rfq(body: RfqIn, s: AsyncSession = Depends(get_session)):
+    async def create_rfq(body: RfqIn, s: AsyncSession = Depends(get_session), _: Viewer = Depends(forbid_supplier)):
         return await service.create_rfq(s, body)
 
     @app.get("/api/rfqs/{rfq_id}")
@@ -107,9 +150,10 @@ def create_app() -> FastAPI:
         response: Response,
         s: AsyncSession = Depends(get_session),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        viewer: Viewer = Depends(forbid_buyer),
     ):
         # A replay of an earlier Idempotency-Key returns the original 201 body unchanged, flagged by a header.
-        result = await service.place_bid(s, rfq_id, body, idempotency_key=idempotency_key)
+        result = await service.place_bid(s, rfq_id, body, idempotency_key=idempotency_key, acting_supplier=viewer.supplier)
         if idempotency_key is not None:
             response.headers["Idempotent-Replayed"] = "true" if result.replayed else "false"
         return dict(result)

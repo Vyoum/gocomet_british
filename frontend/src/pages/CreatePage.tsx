@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, TriggerType } from '../api';
 import { triggerLabel } from '../components/ui';
+import { canCreate, useRole } from '../role';
 
 const local = (offsetMin: number) => {
   const d = new Date(Date.now() + offsetMin * 60000);
@@ -10,6 +11,7 @@ const local = (offsetMin: number) => {
 };
 
 export default function CreatePage() {
+  const role = useRole();
   const nav = useNavigate();
   const [f, setF] = useState({
     referenceId: `RFQ-${Math.floor(Math.random() * 9000 + 1000)}`, name: '', bidStartTime: local(0), bidCloseTime: local(15),
@@ -33,6 +35,7 @@ export default function CreatePage() {
     } catch (e) { setErr((e as Error).message); }
   }
 
+  if (!canCreate(role)) return <div className="card text-sm text-slate-600" data-testid="no-create-note">Suppliers can't create RFQs. Switch to <b>Buyer</b> in the header (demo role, no auth).</div>;
   return (
     <form onSubmit={submit} className="card mx-auto max-w-3xl space-y-6">
       <h1 className="text-lg font-semibold">Create RFQ (British Auction)</h1>

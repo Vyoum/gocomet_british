@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { canCreate, useRole } from '../role';
 import { Link } from 'react-router-dom';
 import { api, RfqSummary, subscribe, TopRank } from '../api';
 import { Countdown, fmtDate, fmtMoney, StatusBadge } from '../components/ui';
@@ -22,14 +23,16 @@ function Leaders({ ranks, chips }: { ranks?: TopRank[]; chips?: boolean }) {
 export default function ListPage() {
   const [rfqs, setRfqs] = useState<RfqSummary[]>([]);
   const [err, setErr] = useState('');
-  const load = useCallback(() => api.rfqs().then(setRfqs).catch((e) => setErr(e.message)), []);
+  const role = useRole();
+  const load = useCallback(() => api.rfqs().then(setRfqs).catch((e) => setErr(e.message)), [role]); // refetch on role switch
   useEffect(() => { load(); return subscribe(load); }, [load]);
 
   return (
     <div className="card p-0">
       <div className="flex items-center justify-between gap-3 p-4 sm:p-5">
         <h1 className="text-lg font-semibold">British Auctions</h1>
-        <Link to="/new" className="btn no-print">+ New RFQ</Link>
+        {canCreate(role) ? <Link to="/new" className="btn no-print">+ New RFQ</Link>
+          : <span className="no-print text-right text-xs text-slate-500" data-testid="no-create-note">Suppliers can't create RFQs (demo role)</span>}
       </div>
       {err && <p className="px-5 text-red-600">{err}</p>}
       <ul className="divide-y divide-slate-100 border-t border-slate-100 md:hidden print-hide" data-testid="rfq-cards">
@@ -37,7 +40,7 @@ export default function ListPage() {
           <li key={r.id}>
             <Link to={`/rfq/${r.id}`} className="block p-4 active:bg-slate-50">
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0"><div className="break-words font-medium text-indigo-700">{r.name}</div><div className="text-xs text-slate-500">{r.referenceId}</div></div>
+                <div className="min-w-0"><div className="break-words font-medium text-indigo-700">{r.name}</div><div className="text-xs text-slate-500">{r.referenceId}{' '}{r.myRank != null && <span className="ml-1 inline-block rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800" data-testid="my-rank">You are L{r.myRank}</span>}</div></div>
                 <StatusBadge s={r.status} />
               </div>
               <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
@@ -61,7 +64,7 @@ export default function ListPage() {
         <tbody className="divide-y divide-slate-100">
           {rfqs.map((r) => (
             <tr key={r.id} className="print-row hover:bg-slate-50">
-              <td className="td print-wrap"><Link className="font-medium text-indigo-700 hover:underline" to={`/rfq/${r.id}`}>{r.name}</Link><div className="text-xs text-slate-500">{r.referenceId}</div></td>
+              <td className="td print-wrap"><Link className="font-medium text-indigo-700 hover:underline" to={`/rfq/${r.id}`}>{r.name}</Link><div className="text-xs text-slate-500">{r.referenceId}{' '}{r.myRank != null && <span className="ml-1 inline-block rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800" data-testid="my-rank">You are L{r.myRank}</span>}</div></td>
               <td className="td print-wrap"><div className="font-semibold">{fmtMoney(r.lowestBid)}</div><div className="mt-1"><Leaders ranks={r.topRanks} /></div></td>
               <td className="td">{fmtDate(r.currentCloseTime)}{r.extensionCount > 0 && <span className="ml-1 text-xs text-amber-700">(+{r.extensionCount} ext)</span>}</td>
               <td className="td"><Countdown to={r.currentCloseTime} from={r.bidStartTime} onZero={load} /></td>

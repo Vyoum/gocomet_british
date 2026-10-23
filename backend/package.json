@@ -6,12 +6,13 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsc",
-    "start": "prisma migrate deploy && node dist/index.js",
+    "start": "prisma migrate deploy && if [ \"$SEED_DEMO\" = \"true\" ]; then tsx prisma/seed-demo.ts; fi && node dist/index.js",
     "test": "vitest run",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "setup": "prisma migrate deploy && prisma generate && tsx prisma/seed.ts"
+    "setup": "prisma migrate deploy && prisma generate && tsx prisma/seed.ts",
+    "db:seed-demo": "tsx prisma/seed-demo.ts"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",
